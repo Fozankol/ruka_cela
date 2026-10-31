@@ -389,7 +389,11 @@ body {
   bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 7px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 8px 7px 16px;
+  white-space: nowrap;
   font-size: 14px;
   opacity: 0;
   transition: opacity 0.5s;
@@ -460,4 +464,22 @@ body {
 
 body.aiming #c {
   cursor: pointer;
+}
+
+.buy {
+  pointer-events: auto;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #15180b;
+  background: var(--soki);
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.buy:disabled {
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: default;
 }

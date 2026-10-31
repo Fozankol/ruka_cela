@@ -23,6 +23,9 @@ export class Hud {
     this.foodVal = this.meter('Еда', 'food');
     this.alertVal = this.meter('Тревога', 'alert');
     this.workers = el('div', 'workers panel', root);
+    this.workerText = el('span', '', this.workers);
+    this.buyBtn = el('button', 'buy', this.workers);
+    this.buyBtn.addEventListener('click', () => this.handlers.buy?.());
 
     this.radio = el('div', 'radio', root);
     this.sayEl = el('div', 'say', root);
@@ -136,7 +139,10 @@ export class Hud {
       total++;
       if (!s.order && !s.hidden && s.load === 0) free++;
     }
-    this.workers.textContent = w.alarmOn ? 'Все прячутся' : `Свободно рабочих: ${free} из ${total}`;
+    this.workerText.textContent = w.alarmOn ? 'Все прячутся' : `Свободно рабочих: ${free} из ${total}`;
+    const cost = w.workerCost();
+    this.buyBtn.textContent = total >= 8 ? 'Гнездо полное' : `Вывести рабочего: ${cost} еды (Z)`;
+    this.buyBtn.disabled = total >= 8 || w.food < cost;
   }
 }
 

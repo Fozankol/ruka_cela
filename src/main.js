@@ -26,7 +26,13 @@ const units = new Units(world, stage);
 const atmosphere = new Atmosphere(world, stage);
 const hud = new Hud(document.getElementById('ui'), world, stage);
 const input = new CameraInput(world, stage, hud);
-hud.handlers = { prompt: () => script.action() };
+hud.handlers = {
+  prompt: () => script.action(),
+  buy: () => {
+    const err = world.buyWorker();
+    if (err) hud.notice(err);
+  },
+};
 
 const p = level.points;
 const presets = {

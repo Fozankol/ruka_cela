@@ -2,8 +2,7 @@ import { dist } from '../../core/util.js';
 import { goTo, lieDown, setState, stomp, wake } from '../../sim/humans.js';
 import { FOOD_GOAL } from '../../sim/world.js';
 
-const START_WORKERS = 3;
-const GROWTH = [35, 70];
+const START_WORKERS = 2;
 const ROOM_LAMPS = ['bedroom', 'hall', 'kitchen', 'bath', 'grandpa'];
 
 // Сценарий первого масштаба: вступление, сбор вкусняшек, изгнание жильцов.
@@ -15,7 +14,6 @@ export class HouseScript {
     this.deaths = 0;
     this.p = world.level.points;
     this.h = Object.fromEntries(world.humans.map((h) => [h.id, h]));
-    this.grown = 0;
     this.lost = 0;
     world.bus.on('heroDead', () => this.onHeroDead());
     world.bus.on('spiderDead', (s) => {
@@ -279,14 +277,9 @@ export class HouseScript {
     }
   }
 
-  // Рой растёт сам, а вместо раздавленных вылупляются новые.
+  // Вместо раздавленных вылупляются новые, рост роя покупает игрок.
   keepSwarm(dt) {
     const { w } = this;
-    while (this.grown < GROWTH.length && w.food >= GROWTH[this.grown]) {
-      this.grown++;
-      w.bus.emit('notice', 'Вылупился новый рабочий');
-      this.spawnWorker();
-    }
     if (this.lost > 0 && !w.alarmOn) {
       this.refill = (this.refill ?? 6) - dt;
       if (this.refill <= 0) {

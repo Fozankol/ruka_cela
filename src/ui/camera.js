@@ -69,6 +69,7 @@ export class CameraInput {
         e.preventDefault();
         world.script?.action();
       }
+      if (e.code === 'KeyZ' && world.rts) this.hud.handlers.buy?.();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
   }

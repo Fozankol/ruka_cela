@@ -4,15 +4,18 @@ import { makeHuman, tickHuman } from './humans.js';
 
 export const SPIDERS = {
   hero: { name: 'Мать', speed: 1.25, scale: 0.17, hp: 8 },
-  carrier: { name: 'Рабочий', speed: 1.15, scale: 0.14, hp: 1 },
+  carrier: { name: 'Рабочий', speed: 0.9, scale: 0.14, hp: 1 },
   fighter: { name: 'Рой', speed: 2.1, scale: 0.1, hp: 1 },
 };
 
 export const FOOD_GOAL = 100;
-const ALERT_PER_FOOD = 1.9;
+const WORKER_COST = 8;
+const WORKER_COST_STEP = 4;
+const WORKER_MAX = 8;
+const ALERT_PER_FOOD = 1.3;
 const ALERT_DECAY = 0.45;
 const ALERT_REST = 6.5;
-const ALERT_SAFE = 35;
+const ALERT_SAFE = 45;
 const HIDE_BOOST = 1.35;
 const TREATS = [
   { name: 'Крошка', color: [2.4, 2.1, 1.4] },
@@ -32,6 +35,7 @@ export class World {
     this.food = 0;
     this.alert = 0;
     this.alarmOn = false;
+    this.bought = 0;
     this.stats = { bites: 0, clicks: 0, gathered: 0, lost: 0 };
     this.biteRate = 0;
     this.spiders = [];
@@ -132,6 +136,23 @@ export class World {
     return s;
   }
 
+  // Рабочий стоит еду, то есть отодвигает победу, но окупается на дистанции.
+  workerCost() {
+    return WORKER_COST + this.bought * WORKER_COST_STEP;
+  }
+
+  buyWorker() {
+    if (this.count('carrier') >= WORKER_MAX) return 'В гнезде нет места';
+    const cost = this.workerCost();
+    if (this.food < cost) return 'Не хватает еды';
+    this.food -= cost;
+    this.bought++;
+    const n = this.nests[0];
+    const s = this.spawn('carrier', n.x - 0.5, n.z + 0.6);
+    this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.5, kind: 'hatch' });
+    return null;
+  }
+
   count(kind) {
     let n = 0;
     for (const s of this.spiders) if (s.kind === kind) n++;
@@ -173,7 +194,7 @@ export class World {
       z: p.z,
       name: look.name,
       color: look.color,
-      value: Math.round(2 + dist(p.x, p.z, home.x, home.z) * 0.4),
+      value: Math.round(2 + dist(p.x, p.z, home.x, home.z) * 0.7),
       worker: null,
       queued: false,
       field: this.grid.flow(p.x, p.z, 'spider'),
