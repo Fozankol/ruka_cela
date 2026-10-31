@@ -145,6 +145,33 @@ export class Grid {
     o.z = this.wz((i - cx) / this.w);
   }
 
+  clearLine(x0, z0, x1, z1, ok) {
+    const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / (this.cell * 0.5));
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      if (!ok[this.type[this.at(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t)]]) return false;
+    }
+    return true;
+  }
+
+  // Самая дальняя точка пути, до которой можно дойти по прямой. Убирает рывки по клеткам.
+  smoothStep(field, x, z, walker, out) {
+    const ok = walker === 'spider' ? SPIDER_OK : HUMAN_OK;
+    if (!this.nextStep(field, x, z, out)) return false;
+    let px = out.x;
+    let pz = out.z;
+    const p = { x: 0, z: 0 };
+    for (let i = 0; i < 9; i++) {
+      if (!this.nextStep(field, px, pz, p) || (p.x === px && p.z === pz)) break;
+      px = p.x;
+      pz = p.z;
+      if (!this.clearLine(x, z, px, pz, ok)) break;
+      out.x = px;
+      out.z = pz;
+    }
+    return true;
+  }
+
   // Следующая точка пути по полю расстояний, без срезания углов через стены.
   nextStep(field, wx, wz, out) {
     const cx = this.cx(wx);

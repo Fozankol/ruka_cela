@@ -104,30 +104,25 @@ export class HouseScript {
       w.setObjective('');
       w.bus.emit('fade', { hold: 2400, text: 'Третья ночь.' });
     },
-    select: () => {
-      this.w.setObjective('Рой родился. Зажми левую кнопку мыши и обведи паучат рамкой.');
-    },
-    flies: () => {
-      const { w, p } = this;
-      for (let i = 0; i < 8; i++) w.addFly(p.plate.x + w.rng.range(-0.3, 0.3), p.plate.z + w.rng.range(-0.3, 0.3));
-      w.setBeacon(p.plate);
-      w.setObjective('Рою нужны соки. Нажми правой кнопкой по мухам у тарелки: паучки будут носить их в гнездо.');
+    swarm: () => {
+      const { w } = this;
+      w.setObjective('Носильщики сами таскают мух в гнездо, это твои соки. Береги их.');
+      w.bus.emit('radio', { who: 'Рой', text: 'Светлые носят еду. Чёрные с красным кусают.' });
     },
     breed: () => {
       const { w } = this;
-      w.setBeacon(null);
       w.flags.swarmBar = true;
       w.bus.emit('flags', w.flags);
-      w.setObjective('Соки пошли. Закажи паучат: клавиша Z или кнопка внизу. Нужно 14. Пусть часть продолжает носить мух.');
-      w.bus.emit('radio', { who: 'Рой', text: 'Ткач плетёт паутину там, где стоит. В ней люди вязнут.' });
+      w.setObjective('Выведи ещё двух бойцов: кнопка справа внизу или клавиша Z. Нужно 4 бойца.');
     },
     wire: () => {
       const { w, p } = this;
-      w.wire = { x: p.wire.x, z: p.wire.z, progress: 0, rate: 0.016, done: false, field: w.grid.flow(p.wire.x, p.wire.z, 'spider') };
+      w.wire = { x: p.wire.x, z: p.wire.z, progress: 0, rate: 0.05, done: false, field: w.grid.flow(p.wire.x, p.wire.z, 'spider') };
       this.wireShown = -1;
       w.setBeacon(p.wire);
       w.revealRoom(4);
-      w.setObjective('Люди живут светом. Выдели паучат и нажми правой кнопкой по щитку в коридоре.');
+      w.setObjective('Люди живут светом. Выбери бойцов и кликни по щитку в коридоре.');
+      this.cam('hall');
     },
     dark: () => {
       const { w, h } = this;
@@ -153,7 +148,8 @@ export class HouseScript {
       h.grandpa.huntable = true;
       w.revealRoom(3);
       w.setBeacon(p.grandpa);
-      w.setObjective('Старик в дальней комнате не слышит. Выдели группу и нажми правой кнопкой по нему.');
+      w.setObjective('Старик в дальней комнате не слышит. Кликни по нему: бойцы нападут.');
+      this.cam('old');
     },
     hunt: () => {
       const { w, h } = this;
@@ -164,7 +160,7 @@ export class HouseScript {
       h.mother.huntable = true;
       h.father.aggressive = true;
       h.mother.aggressive = true;
-      w.setObjective('Они знают. Отправь паучков правой кнопкой к кокону за соками. Потом бери людей из темноты: фонарь видит только впереди.');
+      w.setObjective('Они проснулись. Носильщики идут к кокону, прикрывай их. Фонарь видит только впереди: заходи со спины.');
     },
     still: () => {
       const { w, h } = this;
@@ -300,17 +296,14 @@ export class HouseScript {
         if (this.t > 1.2 && !this.hatched) this.hatchNow();
         if (this.t > 3.6) {
           w.bus.emit('radio', { who: 'Рой', text: 'Восемь. Голодные.' });
-          this.go('select');
+          this.go('swarm');
         }
         break;
-      case 'select':
-        if (w.selectedCount >= 3) this.go('flies');
-        break;
-      case 'flies':
+      case 'swarm':
         if (w.stats.gathered >= 3) this.go('breed');
         break;
       case 'breed':
-        if (w.swarmCount() >= 14) this.go('wire');
+        if (w.count('fighter') >= 4) this.go('wire');
         break;
       case 'wire': {
         if (w.wire.done) {
@@ -419,15 +412,18 @@ export class HouseScript {
     this.hatched = true;
     if (w.hero) w.hero.hidden = false;
     w.addNest(p.crack.x, p.crack.z + 0.05);
-    for (let i = 0; i < 8; i++) w.spawn('ling', p.crack.x - 0.4 + w.rng.range(-0.25, 0.25), p.crack.z + 0.5 + w.rng.range(-0.1, 0.3));
+    w.spawn('fighter', p.crack.x - 0.5, p.crack.z + 0.45);
+    w.spawn('fighter', p.crack.x - 0.25, p.crack.z + 0.75);
+    w.spawn('carrier', p.crack.x - 0.8, p.crack.z + 0.35);
+    w.spawn('carrier', p.crack.x - 0.65, p.crack.z + 0.7);
     if (w.hero) {
       w.hero.x = p.crack.x - 0.9;
       w.hero.z = p.crack.z + 0.75;
       w.hero.px = w.hero.x;
       w.hero.pz = w.hero.z;
     }
-    w.res.silk = 6;
     w.res.soki = 0;
+    for (let i = 0; i < 8; i++) w.addFly(p.plate.x + w.rng.range(-0.3, 0.3), p.plate.z + w.rng.range(-0.3, 0.3));
     w.flags.resources = true;
     w.bus.emit('flags', w.flags);
     // С этого момента у игрока настоящая стратегия: без приказа никто не двигается.
@@ -437,6 +433,7 @@ export class HouseScript {
     w.markLimit = null;
     w.food = { x: p.plate.x, z: p.plate.z, field: w.grid.flow(p.plate.x, p.plate.z, 'spider') };
     this.cam('room');
+    w.bus.emit('hatched');
   }
 
   // Перенос на нужный шаг для проверок: ?skip=wire
@@ -447,11 +444,12 @@ export class HouseScript {
     w.res.soki = 300;
     w.flags.swarmBar = true;
     w.bus.emit('flags', w.flags);
-    if (step === 'flies' || step === 'select') {
+    if (step === 'swarm') {
       this.go(step);
       return;
     }
-    for (let i = 0; i < 8; i++) w.spawn('ling', p.crack.x - 0.8, p.crack.z + 0.9);
+    w.spawn('fighter', p.crack.x - 0.8, p.crack.z + 0.9);
+    w.spawn('fighter', p.crack.x - 0.5, p.crack.z + 1.1);
     w.revealRoom(4);
     w.revealRoom(3);
     if (step === 'wire') {
@@ -477,7 +475,7 @@ export class HouseScript {
     const { w, p } = this;
     if (hm.state !== 'alert' || hm.t < (hm.pause ?? 2)) return;
     hm.pause = 2 + w.rng.next() * 3;
-    const spots = [p.hallMid, p.wire, { x: p.lenaBed.x - 1.5, z: p.lenaBed.z - 1.2 }, { x: p.plate.x + 1.6, z: p.plate.z + 1.2 }, { x: p.grandpa.x + 1, z: p.grandpa.z + 1.6 }];
+    const spots = [p.hallMid, p.wire, p.plate, { x: p.plate.x + 0.6, z: p.plate.z + 1.2 }, { x: p.grandpa.x + 1, z: p.grandpa.z + 1.6 }];
     const s = w.rng.pick(spots);
     goTo(w, hm, s.x, s.z, () => {}, this.step === 'hunt' ? 0.72 : 0.6);
   }

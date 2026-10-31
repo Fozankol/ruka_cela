@@ -1,76 +1,12 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { lerp } from '../core/util.js';
 import { SPIDERS } from '../sim/world.js';
 import { Figure } from './Figure.js';
-import { HeroSpider, chitinMaterial } from './HeroSpider.js';
+import { HeroSpider } from './HeroSpider.js';
 import { CAST_LAYER } from './KeyShadow.js';
 import { additive, worldMaterial } from './worldMaterial.js';
 
-const MAX_SPIDERS = 1600;
 const MAX_RIPPLES = 96;
-
-function tag(geo, leg, color, emis) {
-  geo.deleteAttribute('uv');
-  const n = geo.attributes.position.count;
-  const legs = new Float32Array(n).fill(leg);
-  const em = new Float32Array(n).fill(emis);
-  const c = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    c[i * 3] = color[0];
-    c[i * 3 + 1] = color[1];
-    c[i * 3 + 2] = color[2];
-  }
-  geo.setAttribute('aLeg', new THREE.BufferAttribute(legs, 1));
-  geo.setAttribute('aEmis', new THREE.BufferAttribute(em, 1));
-  geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  return geo;
-}
-
-function segment(a, b, r0, r1, leg) {
-  const dir = new THREE.Vector3().subVectors(b, a);
-  const len = dir.length();
-  const g = new THREE.CylinderGeometry(r1, r0, len, 5, 1, true);
-  g.translate(0, len / 2, 0);
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-  g.applyQuaternion(q);
-  g.translate(a.x, a.y, a.z);
-  return tag(g.toNonIndexed(), leg, [0.03, 0.03, 0.035], 0);
-}
-
-// Каракурт: чёрное брюшко с красными пятнами и восемь суставчатых лап.
-function spiderGeometry() {
-  const parts = [];
-  const body = new THREE.SphereGeometry(0.42, 12, 9);
-  body.scale(1.2, 0.86, 1);
-  body.translate(-0.42, 0.42, 0);
-  parts.push(tag(body.toNonIndexed(), 0, [0.03, 0.03, 0.035], 0));
-  const head = new THREE.SphereGeometry(0.24, 10, 7);
-  head.translate(0.2, 0.32, 0);
-  parts.push(tag(head.toNonIndexed(), 0, [0.04, 0.035, 0.04], 0));
-  const spots = [[-0.42, 0.74, 0], [-0.72, 0.66, 0.1], [-0.72, 0.66, -0.1], [-0.2, 0.7, 0.13], [-0.2, 0.7, -0.13], [-0.52, 0.56, 0.3], [-0.52, 0.56, -0.3]];
-  for (const [x, y, z] of spots) {
-    const s = new THREE.SphereGeometry(0.058, 6, 5);
-    s.translate(x, y, z);
-    parts.push(tag(s.toNonIndexed(), 0, [0.8, 0.03, 0.02], 1.9));
-  }
-  for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 4; i++) {
-      const leg = i + (side > 0 ? 1 : 5);
-      const spread = -0.95 + i * 0.63;
-      const ox = Math.sin(spread);
-      const oz = Math.cos(spread) * side;
-      const start = new THREE.Vector3(0.18 + ox * 0.16, 0.3, oz * 0.16);
-      const knee = new THREE.Vector3(0.18 + ox * 0.62, 0.78, oz * 0.62);
-      const tip = new THREE.Vector3(0.18 + ox * 1.25, 0.0, oz * 1.25);
-      parts.push(segment(start, knee, 0.042, 0.03, leg));
-      parts.push(segment(knee, tip, 0.03, 0.008, leg));
-    }
-  }
-  const merged = mergeGeometries(parts, false);
-  merged.computeBoundingSphere();
-  return merged;
-}
 
 function rippleMaterial() {
   return new THREE.ShaderMaterial({
@@ -114,15 +50,6 @@ export class Units {
     scene.add(this.group);
     const dummy = new THREE.Object3D();
     this.dummy = dummy;
-
-    const geo = spiderGeometry();
-    this.anim = new Float32Array(MAX_SPIDERS * 2);
-    geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(this.anim, 2).setUsage(THREE.DynamicDrawUsage));
-    this.spiders = new THREE.InstancedMesh(geo, chitinMaterial({ instanced: true }), MAX_SPIDERS);
-    this.spiders.layers.enable(CAST_LAYER);
-    this.spiders.frustumCulled = false;
-    this.spiders.count = 0;
-    this.group.add(this.spiders);
 
     const ripGeo = new THREE.PlaneGeometry(1, 1);
     ripGeo.rotateX(-Math.PI / 2);
@@ -183,7 +110,6 @@ export class Units {
     this.group.add(this.flies);
 
     this.figures = world.humans.map((h) => new Figure(h, this.group));
-    this.hero = new HeroSpider(this.group, SPIDERS.hero.scale);
     this.cocoonMeshes = [];
     this.cocoonMat = worldMaterial({ color: 0xdde2ea, glow: 0.018 });
     this.cocoonGeo = new THREE.SphereGeometry(1, 16, 12);
@@ -207,12 +133,24 @@ export class Units {
 
     const ringGeo = new THREE.RingGeometry(0.9, 1, 30);
     ringGeo.rotateX(-Math.PI / 2);
-    this.rings = new THREE.InstancedMesh(ringGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.85, 0.36), ...additive }), 300);
+    // Кольца рисуются поверх всего, поэтому не прячутся под ковёр.
+    this.rings = new THREE.InstancedMesh(ringGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.85, 0.36), ...additive, depthTest: false }), 64);
     this.rings.frustumCulled = false;
     this.rings.count = 0;
     this.rings.renderOrder = 6;
     this.group.add(this.rings);
     this.selection = null;
+    this.hover = null;
+    this.hoverRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, ...additive, depthTest: false }));
+    this.hoverRing.position.y = 0.02;
+    this.hoverRing.renderOrder = 7;
+    this.hoverRing.visible = false;
+    this.group.add(this.hoverRing);
+    this.rigs = new Map();
+    world.bus.on('spiderDead', (s) => {
+      this.rigs.get(s)?.dispose();
+      this.rigs.delete(s);
+    });
   }
 
   showMark(m, attack) {
@@ -266,26 +204,14 @@ export class Units {
   update(dt, alpha) {
     const w = this.world;
     const d = this.dummy;
-    let n = 0;
-    // Вдали пауки чуть крупнее реального, иначе рой превратился бы в пыль.
-    const far = 1 + Math.min(1.3, Math.max(0, (this.stage.rig.dist - 4) * 0.085));
     for (const s of w.spiders) {
-      if (s.hidden || s.kind === 'hero' || n >= MAX_SPIDERS) continue;
-      const def = SPIDERS[s.kind];
-      const x = s.on ? s.x : lerp(s.px, s.x, alpha);
-      const z = s.on ? s.z : lerp(s.pz, s.z, alpha);
-      d.position.set(x, s.y, z);
-      d.rotation.set(0, -s.dir, 0);
-      d.scale.setScalar(def.scale * far);
-      d.updateMatrix();
-      this.spiders.setMatrixAt(n, d.matrix);
-      this.anim[n * 2] = s.moveSeed;
-      this.anim[n * 2 + 1] = s.moving ? 1 : 0.06;
-      n++;
+      let rig = this.rigs.get(s);
+      if (!rig) {
+        rig = new HeroSpider(this.group, SPIDERS[s.kind].scale, s.kind);
+        this.rigs.set(s, rig);
+      }
+      rig.update(s, dt, alpha);
     }
-    this.spiders.count = n;
-    this.spiders.instanceMatrix.needsUpdate = true;
-    this.spiders.geometry.attributes.aAnim.needsUpdate = true;
 
     let r = 0;
     this.ripples = this.ripples.filter((p) => (p.age += dt / p.life) < 1);
@@ -364,10 +290,10 @@ export class Units {
 
     let rn = 0;
     for (const s of this.selection ?? []) {
-      if (rn >= 300 || s.hidden) continue;
+      if (rn >= 64 || s.hidden) continue;
       d.position.set(lerp(s.px, s.x, alpha), s.y + 0.012, lerp(s.pz, s.z, alpha));
       d.rotation.set(0, 0, 0);
-      d.scale.setScalar(SPIDERS[s.kind].scale * (s.kind === 'hero' ? 1.15 : 1.45) * far);
+      d.scale.setScalar(SPIDERS[s.kind].scale * 1.75);
       d.updateMatrix();
       this.rings.setMatrixAt(rn++, d.matrix);
     }
@@ -375,7 +301,17 @@ export class Units {
     this.rings.instanceMatrix.needsUpdate = true;
 
     for (const f of this.figures) f.update(dt, alpha);
-    this.hero.update(w.hero, dt, alpha);
+
+    const hv = this.hover;
+    const show = hv?.pos && hv.type !== 'unit';
+    this.hoverRing.visible = !!show;
+    if (show) {
+      const k = 1 + Math.sin(performance.now() * 0.008) * 0.06;
+      this.hoverRing.position.x = hv.pos.x;
+      this.hoverRing.position.z = hv.pos.z;
+      this.hoverRing.scale.setScalar((hv.type === 'attack' ? 0.5 : 0.36) * k);
+      this.hoverRing.material.color.setRGB(hv.danger ? 2.4 : 1.1, hv.danger ? 0.3 : 1.4, hv.danger ? 0.2 : 1);
+    }
   }
 
   dispose() {

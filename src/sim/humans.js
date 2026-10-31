@@ -1,4 +1,4 @@
-import { clamp, dist } from '../core/util.js';
+import { angleLerp, clamp, dist } from '../core/util.js';
 
 const STEP = { x: 0, z: 0 };
 
@@ -12,7 +12,7 @@ export function makeHuman(def) {
     t: 0,
     cool: 0,
     venom: 0,
-    venomMax: def.deepSleep ? 1.3 : 2.2,
+    venomMax: def.deepSleep ? 1.3 : 3,
     wrap: 0,
     attached: 0,
     lie: 1,
@@ -77,7 +77,7 @@ export function dropTorch(world, h) {
 
 function step(world, h, dt) {
   h.moving = true;
-  if (!world.grid.nextStep(h.field, h.x, h.z, STEP)) return true;
+  if (!world.grid.smoothStep(h.field, h.x, h.z, 'human', STEP)) return true;
   const dx = STEP.x - h.x;
   const dz = STEP.z - h.z;
   const d = Math.hypot(dx, dz);
@@ -87,7 +87,7 @@ function step(world, h, dt) {
     const v = Math.min(speed * dt, d);
     h.x += (dx / d) * v;
     h.z += (dz / d) * v;
-    h.dir = Math.atan2(dz, dx);
+    h.dir = angleLerp(h.dir, Math.atan2(dz, dx), Math.min(1, dt * 7));
   }
   h.stepT -= dt;
   if (h.stepT <= 0) {

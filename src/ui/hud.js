@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NEST_COST, SPIDERS } from '../sim/world.js';
+import { SPIDERS } from '../sim/world.js';
 
 const el = (tag, cls, parent, text) => {
   const e = document.createElement(tag);
@@ -12,47 +12,50 @@ const el = (tag, cls, parent, text) => {
 const fmt = (v) => Math.floor(v).toLocaleString('ru-RU');
 const V = new THREE.Vector3();
 
+const legs = [[-8, -6], [-9, -1], [-9, 3], [-7, 8], [8, -6], [9, -1], [9, 3], [7, 8]]
+  .map(([x, y]) => `<path d="M0 0 L${x * 0.62} ${y * 0.5 - 3} L${x} ${y}"/>`)
+  .join('');
+
+// Значок паука для панели. Цвет совпадает с пауком в игре.
+const icon = (kind) => `
+  <svg viewBox="-11 -11 22 22" class="ico ${kind}">
+    <g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round">${legs}</g>
+    <ellipse cx="0" cy="3.4" rx="${kind === 'hero' ? 5 : 3.8}" ry="${kind === 'hero' ? 6 : 4.6}" fill="currentColor"/>
+    <circle cx="0" cy="-3.2" r="2.4" fill="currentColor"/>
+    ${kind === 'carrier' ? '' : '<circle cx="0" cy="3.4" r="1.5" fill="#e0342a"/>'}
+  </svg>`;
+
 export class Hud {
   constructor(root, world, stage) {
     this.world = world;
     this.stage = stage;
     this.handlers = {};
+    this.sel = new Set();
 
     this.objective = el('div', 'objective panel', root);
     this.resBar = el('div', 'res panel', root);
-    this.silk = this.stat('silk', 'Шёлк');
     this.soki = this.stat('soki', 'Соки');
     this.swarm = this.stat('swarm', 'Рой');
     this.pop = this.stat('pop', 'Люди');
 
-    this.command = el('div', 'command', root);
-    this.units = el('div', 'train panel', this.command);
-    this.trainButtons = ['ling', 'weaver'].map((kind) => {
-      const def = SPIDERS[kind];
-      const b = el('button', 'unit', this.units);
-      el('i', '', b, def.key);
-      el('b', '', b, def.name);
-      el('em', '', b, def.desc);
-      el('span', '', b, `${def.cost} соков, ${def.supply} места`);
-      b.addEventListener('click', () => this.handlers.action?.(kind));
-      return { b, def };
-    });
-    this.queue = el('div', 'queue', this.units);
+    this.dock = el('div', 'dock', root);
+    this.groups = el('div', 'groups panel', this.dock);
+    this.fighters = this.groupButton('Бойцы', '1', 'fighters', 'fighter');
+    this.carriers = this.groupButton('Носильщики', '2', 'carriers', 'carrier');
+    this.home = this.groupButton('Домой', 'H', 'home');
 
-    this.card = el('div', 'card panel', this.command);
-    this.selInfo = el('div', 'sel', this.card, 'Никто не выбран');
-    this.cmdRow = el('div', 'cmds', this.card);
-    this.cmds = [
-      ['amove', 'Атака', 'Q', 'Идти и кусать всех по пути'],
-      ['stop', 'Стоп', 'E', 'Остановиться'],
-      ['hide', 'Затаиться', 'R', 'Замереть: люди не заметят издали'],
-      ['nest', 'Гнездо', 'B', `Только Мать. ${NEST_COST} шёлка, +12 мест роя`],
-    ].map(([id, label, key, title]) => {
-      const b = el('button', 'cmd', this.cmdRow);
-      b.title = title;
-      b.innerHTML = `${label}<i>${key}</i>`;
-      b.addEventListener('click', () => this.handlers.action?.(id));
-      return { id, b };
+    this.roster = el('div', 'roster panel', this.dock);
+    this.tiles = [];
+    this.rosterKey = '';
+
+    this.train = el('div', 'train panel', this.dock);
+    this.trainButtons = ['fighter', 'carrier'].map((kind, i) => {
+      const def = SPIDERS[kind];
+      const b = el('button', 'unit', this.train);
+      b.title = def.desc;
+      b.innerHTML = `${icon(kind)}<span><b>${def.name}</b><em>${def.cost} соков</em></span><i>${i ? 'X' : 'Z'}</i><u></u>`;
+      b.addEventListener('click', () => this.handlers.action?.(kind));
+      return { b, def, kind, bar: b.querySelector('u') };
     });
 
     this.radio = el('div', 'radio', root);
@@ -62,6 +65,7 @@ export class Hud {
     this.promptEl = el('button', 'prompt', root);
     this.promptEl.addEventListener('click', () => this.handlers.prompt?.());
     this.boxEl = el('div', 'box', root);
+    this.tip = el('div', 'tip', root);
     this.bars = world.humans.map((h) => {
       const bar = el('div', 'hbar', root);
       el('span', '', bar, h.name);
@@ -85,6 +89,13 @@ export class Hud {
     const box = el('div', cls, this.resBar);
     el('span', '', box, label);
     return el('b', '', box, '0');
+  }
+
+  groupButton(label, key, action, kind) {
+    const b = el('button', 'group', this.groups);
+    b.innerHTML = `${kind ? icon(kind) : ''}<span>${label}</span><i>${key}</i>`;
+    b.addEventListener('click', () => this.handlers.action?.(action));
+    return b;
   }
 
   setObjective(text) {
@@ -114,8 +125,8 @@ export class Hud {
 
   setFlags(f) {
     this.resBar.classList.toggle('on', f.resources);
-    this.command.classList.toggle('on', f.resources);
-    this.units.classList.toggle('on', f.swarmBar);
+    this.dock.classList.toggle('on', f.resources);
+    this.train.classList.toggle('on', f.swarmBar);
   }
 
   setBox(x0, y0, x1, y1) {
@@ -131,19 +142,20 @@ export class Hud {
     b.style.height = `${Math.abs(y1 - y0)}px`;
   }
 
-  setSelection(list, mode) {
-    const by = {};
-    for (const s of list) by[s.kind] = (by[s.kind] ?? 0) + 1;
-    const names = Object.entries(by).map(([k, n]) => `${SPIDERS[k].name} ${k === 'hero' ? '' : '×' + n}`.trim());
-    this.selInfo.textContent = list.length ? names.join(', ') : 'Выдели пауков рамкой';
-    const hasHero = !!by.hero;
-    for (const c of this.cmds) {
-      c.b.disabled = !list.length || (c.id === 'nest' && !hasHero);
-      c.b.classList.toggle('armed', c.id === mode);
-    }
-    const hint = { amove: 'Клик по полу: идти и кусать всех по пути', nest: 'Клик по полу: место для гнезда' }[mode];
-    if (hint) this.notice(hint);
-    document.body.classList.toggle('aiming', !!mode);
+  setSelection(sel) {
+    this.sel = sel;
+  }
+
+  // Подсказка у курсора: что случится при клике.
+  setTip(it, x, y) {
+    const t = this.tip;
+    t.classList.toggle('on', !!it);
+    document.body.classList.toggle('aiming', it?.type === 'attack' || it?.type === 'gnaw');
+    if (!it) return;
+    if (t.textContent !== it.label) t.textContent = it.label;
+    t.classList.toggle('danger', !!it.danger);
+    t.style.left = `${x + 16}px`;
+    t.style.top = `${y + 14}px`;
   }
 
   addRadio({ who, text }) {
@@ -168,21 +180,47 @@ export class Hud {
     setTimeout(() => this.fadeEl.classList.remove('on'), hold);
   }
 
+  // Портреты пересобираются только когда меняется состав роя.
+  updateRoster() {
+    const w = this.world;
+    const order = { hero: 0, fighter: 1, carrier: 2 };
+    const list = [...w.spiders].sort((a, b) => order[a.kind] - order[b.kind] || a.id - b.id);
+    const key = list.map((s) => s.id).join();
+    if (key !== this.rosterKey) {
+      this.rosterKey = key;
+      this.roster.innerHTML = '';
+      this.tiles = list.map((s) => {
+        const b = el('button', `tile ${s.kind}`, this.roster);
+        b.innerHTML = `${icon(s.kind)}<i></i>`;
+        b.title = SPIDERS[s.kind].name;
+        b.addEventListener('click', (e) => this.handlers.pick?.(s, e.shiftKey));
+        return { s, b, hp: b.querySelector('i') };
+      });
+    }
+    for (const { s, b, hp } of this.tiles) {
+      const k = s.hp / SPIDERS[s.kind].hp;
+      hp.style.width = `${Math.max(0, k) * 100}%`;
+      hp.style.background = k > 0.6 ? '#7ddf72' : k > 0.3 ? '#e8c04a' : '#e0342a';
+      b.classList.toggle('sel', this.sel.has(s));
+      b.classList.toggle('load', s.load > 0);
+      b.classList.toggle('work', !!s.on || s.order?.type === 'attack' || s.order?.type === 'gnaw');
+    }
+  }
+
   update() {
     const w = this.world;
-    this.silk.textContent = fmt(w.res.silk);
     this.soki.textContent = fmt(w.res.soki);
     this.swarm.textContent = `${w.supplyUsed()} / ${w.supplyCap()}`;
     this.pop.textContent = `${w.level.population}`;
-    for (const u of this.trainButtons) u.b.disabled = w.res.soki < u.def.cost;
+    this.updateRoster();
 
-    let q = 0;
-    let head = null;
-    for (const n of w.nests) {
-      q += n.queue.length;
-      if (!head && n.queue[0]) head = n.queue[0];
+    const nest = w.nests[0];
+    for (const u of this.trainButtons) {
+      u.b.disabled = w.res.soki < u.def.cost || w.supplyUsed() + u.def.supply > w.supplyCap();
+      const q = nest?.queue[0];
+      u.bar.style.width = q?.kind === u.kind ? `${(1 - q.left / q.total) * 100}%` : '0';
     }
-    this.queue.textContent = head ? `В кладке: ${q}, следующий через ${Math.ceil(head.left)} с` : '';
+    this.home.disabled = !this.sel.size;
 
     // Полоски яда над людьми: видно, сколько осталось до паралича.
     const cam = this.stage.camera;

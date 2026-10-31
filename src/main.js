@@ -27,8 +27,12 @@ const atmosphere = new Atmosphere(world, stage);
 const hud = new Hud(document.getElementById('ui'), world, stage);
 const rts = new Rts(world, stage, hud);
 units.selection = rts.sel;
-hud.handlers = { action: (name) => rts.action(name), prompt: () => script.action() };
-hud.setSelection([], null);
+hud.handlers = {
+  action: (name) => rts.action(name),
+  prompt: () => script.action(),
+  pick: (s, add) => rts.select([s], add),
+};
+hud.setSelection(rts.sel);
 
 const p = level.points;
 const presets = {
@@ -36,6 +40,8 @@ const presets = {
   hand: { target: { x: p.hand.x + 0.07, z: p.hand.z + 0.1, y: 0.16 }, dist: 1.0, pitch: 0.15, yaw: 0.02, soft: 2.4 },
   flee: { dist: 3.4, pitch: 0.62, yaw: 1.05, soft: 2.2 },
   room: { target: { x: p.crack.x - 2.6, z: p.crack.z + 2.1 }, dist: 8.2, pitch: 1.02, yaw: 1.57, soft: 1.6 },
+  hall: { target: { x: p.wire.x - 0.4, z: p.wire.z - 0.2 }, dist: 9, pitch: 1.02, yaw: 1.57, soft: 1.4 },
+  old: { target: { x: p.grandpa.x - 1.2, z: p.grandpa.z + 1.8 }, dist: 10, pitch: 1.02, yaw: 1.57, soft: 1.4 },
   house: { target: { x: level.worldW / 2, z: level.worldD / 2 }, dist: 19, pitch: 1.08, yaw: 1.57, soft: 1.2 },
 };
 
@@ -76,6 +82,7 @@ function frame(now) {
     }
   }
   rts.update(dt);
+  units.hover = rts.hover;
   if (running && !window.__g.paused) sound.update(dt * speed);
   stage.update(dt);
   stage.updateMap(dt);

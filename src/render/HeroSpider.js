@@ -9,10 +9,8 @@ const B = new THREE.Vector3();
 const C = new THREE.Vector3();
 
 // Блестящий хитин с тонким ворсом и красными пятнами.
-export function chitinMaterial({ red = false, instanced = false } = {}) {
+export function chitinMaterial({ red = false, base = 0x050505 } = {}) {
   return new THREE.ShaderMaterial({
-    vertexColors: instanced,
-    defines: instanced ? { SWARM: 1 } : {},
     uniforms: {
       uMap: shared.uMap,
       uMapXform: shared.uMapXform,
@@ -25,42 +23,14 @@ export function chitinMaterial({ red = false, instanced = false } = {}) {
       uShadowMat: shared.uShadowMat,
       uShadowOn: shared.uShadowOn,
       uRed: { value: red ? 1 : 0 },
+      uBase: { value: new THREE.Color(base) },
     },
     vertexShader: /* glsl */ `
-      uniform float uTime;
       varying vec3 vPos;
       varying vec3 vN;
-      varying vec3 vCol;
-      varying float vEmis;
-      #ifdef SWARM
-        attribute float aLeg;
-        attribute float aEmis;
-        attribute vec2 aAnim;
-      #endif
       void main(){
-        vec3 p = position;
-        vCol = vec3(.018, .017, .02);
-        vEmis = 0.;
-        #ifdef SWARM
-          vCol = color;
-          vEmis = aEmis;
-          if (aLeg > .5) {
-            float reach = length(p.xz - vec2(.18, 0.));
-            float gait = mod(aLeg, 2.) * 3.14159;
-            float ph = uTime * (6. + aAnim.y * 16.) + aAnim.x * 6.28 + gait;
-            float a = sin(ph) * .34 * aAnim.y;
-            float c = cos(a * reach), s = sin(a * reach);
-            p.xz -= vec2(.18, 0.);
-            p.xz = mat2(c, -s, s, c) * p.xz;
-            p.xz += vec2(.18, 0.);
-            p.y += max(0., cos(ph)) * .2 * aAnim.y * reach;
-          }
-        #endif
         mat4 m = modelMatrix;
-        #ifdef USE_INSTANCING
-          m = modelMatrix * instanceMatrix;
-        #endif
-        vec4 wp = m * vec4(p, 1.);
+        vec4 wp = m * vec4(position, 1.);
         vPos = wp.xyz;
         vN = normalize(mat3(m) * normal);
         gl_Position = projectionMatrix * viewMatrix * wp;
@@ -71,10 +41,9 @@ export function chitinMaterial({ red = false, instanced = false } = {}) {
       uniform vec4 uMapXform;
       uniform vec3 uCam;
       uniform float uRed;
+      uniform vec3 uBase;
       varying vec3 vPos;
       varying vec3 vN;
-      varying vec3 vCol;
-      varying float vEmis;
       ${noiseGLSL}
       ${lightGLSL}
       void main(){
@@ -87,10 +56,9 @@ export function chitinMaterial({ red = false, instanced = false } = {}) {
         vec3 direct = gather(vPos, N, V, m, .85, gl_FragCoord.xy, spec);
         vec3 H = normalize(V + vec3(-.4, .8, .4));
         float moonSpec = pow(max(dot(N, H), 0.), 110.);
-        vec3 col = vCol * (vec3(.2, .24, .36) + direct * 1.6);
+        vec3 col = uBase * (vec3(.2, .24, .36) + direct * 1.6);
         col += rim * (vec3(.045, .06, .12) + direct * .3);
         col += spec * 1.5 + moonSpec * vec3(.3, .4, .7);
-        col += vCol * vEmis;
         if (uRed > .5) col = vec3(.5, .012, .008) * (.5 + direct * .9) + vec3(.34, .01, .006) + spec * .6;
         gl_FragColor = vec4(col, clamp(length(uCam - vPos) / ${FAR.toFixed(1)}, 0., 1.));
       }
@@ -113,6 +81,13 @@ function place(mesh, a, b) {
   mesh.quaternion.setFromUnitVectors(UP, C.divideScalar(len));
 }
 
+// Бойцы чёрные с красным, носильщики светлее: их легко отличить с первого взгляда.
+const LOOKS = {
+  hero: { base: 0x050505, spots: 10, fang: 1 },
+  fighter: { base: 0x060505, spots: 5, fang: 1.5 },
+  carrier: { base: 0x6b4a22, spots: 0, fang: 0.6 },
+};
+
 const LEGS = [
   { side: 1, ang: 0.68, reach: 1.5, group: 0 },
   { side: 1, ang: 1.22, reach: 1.42, group: 1 },
@@ -126,12 +101,15 @@ const LEGS = [
 
 // Главный паук: лапы ставятся на пол по-настоящему и шагают попеременно.
 export class HeroSpider {
-  constructor(scene, size) {
+  constructor(scene, size, kind = 'hero') {
     this.S = size;
+    this.kind = kind;
+    this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const mat = chitinMaterial();
-    const red = chitinMaterial({ red: true });
+    const look = LOOKS[kind];
+    const mat = look.mat ?? (look.mat = chitinMaterial({ base: look.base }));
+    const red = look.spot ?? (look.spot = chitinMaterial({ red: true }));
     const S = size;
 
     const cast = (m) => {
@@ -155,7 +133,7 @@ export class HeroSpider {
     this.body.add(this.belly);
 
     const spots = [[0.08, 0.47, 0, 0.09], [-0.14, 0.46, 0.09, 0.075], [-0.14, 0.46, -0.09, 0.075], [-0.32, 0.38, 0, 0.1], [0.24, 0.42, 0.09, 0.06], [0.24, 0.42, -0.09, 0.06], [-0.02, 0.34, 0.3, 0.06], [-0.02, 0.34, -0.3, 0.06], [-0.26, 0.28, 0.28, 0.055], [-0.26, 0.28, -0.28, 0.055]];
-    for (const [x, y, z, r] of spots) {
+    for (const [x, y, z, r] of spots.slice(0, look.spots)) {
       const s = new THREE.Mesh(new THREE.SphereGeometry(r * S, 10, 8), red);
       s.scale.y = 0.45;
       s.position.set(x * S, y * S, z * S);
@@ -170,10 +148,19 @@ export class HeroSpider {
 
     for (let i = 0; i < 2; i++) {
       const side = i ? 1 : -1;
-      const fang = cast(new THREE.Mesh(new THREE.ConeGeometry(0.05 * S, 0.2 * S, 7), mat));
+      const fang = cast(new THREE.Mesh(new THREE.ConeGeometry(0.05 * S * look.fang, 0.2 * S * look.fang, 7), mat));
       fang.position.set(0.3 * S, -0.1 * S, side * 0.07 * S);
       fang.rotation.z = 2.5;
       this.body.add(fang);
+    }
+
+    if (kind === 'carrier') {
+      const sac = new THREE.SphereGeometry(0.42 * S, 14, 10);
+      this.sac = new THREE.Mesh(sac, look.sac ?? (look.sac = chitinMaterial({ base: 0xd8c690 })));
+      this.sac.position.set(-0.5 * S, 0.62 * S, 0);
+      this.sac.layers.enable(CAST_LAYER);
+      this.sac.visible = false;
+      this.body.add(this.sac);
     }
 
     this.legs = LEGS.map((def) => {
@@ -199,7 +186,7 @@ export class HeroSpider {
   restPoint(leg, out) {
     const a = this.yaw + leg.ang * leg.side;
     const r = leg.reach * this.S;
-    out.set(this.pos.x + Math.cos(a) * r, 0, this.pos.z + Math.sin(a) * r);
+    out.set(this.pos.x + Math.cos(a) * r, this.base, this.pos.z + Math.sin(a) * r);
     return out;
   }
 
@@ -210,8 +197,10 @@ export class HeroSpider {
       this.visible = false;
       return;
     }
-    const x = lerp(s.px, s.x, alpha);
-    const z = lerp(s.pz, s.z, alpha);
+    const x = s.on ? s.x : lerp(s.px, s.x, alpha);
+    const z = s.on ? s.z : lerp(s.pz, s.z, alpha);
+    this.base = s.y;
+    if (this.sac) this.sac.visible = s.load > 0;
     const moved = Math.hypot(x - this.pos.x, z - this.pos.z);
     const velX = dt > 0 ? (x - this.pos.x) / dt : 0;
     const velZ = dt > 0 ? (z - this.pos.z) / dt : 0;
@@ -225,7 +214,7 @@ export class HeroSpider {
     const speedNow = moved / Math.max(dt, 0.001);
     this.sway = lerp(this.sway, da * 0.4, 0.1);
     this.bob += dt * (3 + speedNow * 16);
-    const y = S * (0.5 + Math.sin(this.bob) * (speedNow > 0.1 ? 0.025 : 0.008));
+    const y = s.y + S * (0.5 + Math.sin(this.bob) * (speedNow > 0.1 ? 0.025 : 0.008));
 
     this.body.position.set(x, y, z);
     this.body.rotation.set(0, -this.yaw, 0);
@@ -258,9 +247,9 @@ export class HeroSpider {
         leg.to.copy(A);
         leg.t = Math.min(1, leg.t + dt / stepTime);
         leg.foot.lerpVectors(leg.from, leg.to, leg.t);
-        leg.foot.y = Math.sin(leg.t * Math.PI) * S * 0.28;
+        leg.foot.y = s.y + Math.sin(leg.t * Math.PI) * S * 0.28;
       } else {
-        leg.foot.y = 0;
+        leg.foot.y = s.y;
         const off = Math.hypot(A.x - leg.foot.x, A.z - leg.foot.z);
         if (off > stride && (!busy[1 - leg.group] || off > stride * 1.6)) {
           leg.from.copy(leg.foot);
@@ -279,6 +268,11 @@ export class HeroSpider {
       }
       this.placeLeg(leg, y);
     }
+  }
+
+  dispose() {
+    this.scene.remove(this.root);
+    this.root.traverse((o) => o.geometry?.dispose());
   }
 
   placeLeg(leg, y) {
