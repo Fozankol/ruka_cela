@@ -178,7 +178,7 @@ export class Units {
     const flyPos = new Float32Array(32 * 3);
     this.flyGeo = new THREE.BufferGeometry();
     this.flyGeo.setAttribute('position', new THREE.BufferAttribute(flyPos, 3).setUsage(THREE.DynamicDrawUsage));
-    this.flies = new THREE.Points(this.flyGeo, new THREE.PointsMaterial({ color: new THREE.Color(1.3, 1.25, 0.8), size: 0.018, sizeAttenuation: true }));
+    this.flies = new THREE.Points(this.flyGeo, new THREE.PointsMaterial({ color: new THREE.Color(1.3, 1.25, 0.8), size: 0.03, sizeAttenuation: true }));
     this.flies.frustumCulled = false;
     this.group.add(this.flies);
 
@@ -202,12 +202,25 @@ export class Units {
     world.bus.on('slipper', (e) => this.onSlipper(e));
     world.bus.on('human', (e) => e.event === 'cocoon' && this.addCocoon(e.h));
     world.bus.on('nest', (n) => this.addNest(n));
-    world.bus.on('mark', (m) => {
-      this.markRing.position.x = m.x;
-      this.markRing.position.z = m.z;
-      this.markRing.visible = true;
-      this.markLife = 1;
-    });
+    world.bus.on('mark', (m) => this.showMark(m, false));
+    world.bus.on('order', (o) => this.showMark(o, o.attack));
+
+    const ringGeo = new THREE.RingGeometry(0.9, 1, 30);
+    ringGeo.rotateX(-Math.PI / 2);
+    this.rings = new THREE.InstancedMesh(ringGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.85, 0.36), ...additive }), 300);
+    this.rings.frustumCulled = false;
+    this.rings.count = 0;
+    this.rings.renderOrder = 6;
+    this.group.add(this.rings);
+    this.selection = null;
+  }
+
+  showMark(m, attack) {
+    this.markRing.position.x = m.x;
+    this.markRing.position.z = m.z;
+    this.markRing.visible = true;
+    this.markRing.material.color.setRGB(attack ? 3 : 1.2, attack ? 0.3 : 1.7, attack ? 0.2 : 1.2);
+    this.markLife = 1;
   }
 
   addRipple({ x, z, power = 1, kind = 'step' }) {
@@ -242,12 +255,12 @@ export class Units {
     this.addRipple({ x: h.x, z: h.z, power: 1, kind: 'bite' });
   }
 
-  addNest({ x, z }) {
+  addNest(nest) {
     const m = new THREE.Mesh(this.cocoonGeo, this.nestMat);
-    m.position.set(x, 0.05, z);
-    m.scale.set(0.16, 0.09, 0.13);
+    m.position.set(nest.x, 0.05, nest.z);
+    m.layers.enable(CAST_LAYER);
     this.group.add(m);
-    this.nestMeshes.push(m);
+    this.nestMeshes.push({ m, nest });
   }
 
   update(dt, alpha) {
@@ -342,6 +355,24 @@ export class Units {
     }
     this.flyGeo.setDrawRange(0, fn);
     fp.needsUpdate = true;
+
+    for (const { m, nest } of this.nestMeshes) {
+      const k = 0.35 + nest.built * 0.65;
+      const beat = nest.queue.length ? 1 + Math.sin(performance.now() * 0.006) * 0.05 : 1;
+      m.scale.set(0.2 * k * beat, 0.11 * k * beat, 0.16 * k * beat);
+    }
+
+    let rn = 0;
+    for (const s of this.selection ?? []) {
+      if (rn >= 300 || s.hidden) continue;
+      d.position.set(lerp(s.px, s.x, alpha), s.y + 0.012, lerp(s.pz, s.z, alpha));
+      d.rotation.set(0, 0, 0);
+      d.scale.setScalar(SPIDERS[s.kind].scale * (s.kind === 'hero' ? 1.15 : 1.45) * far);
+      d.updateMatrix();
+      this.rings.setMatrixAt(rn++, d.matrix);
+    }
+    this.rings.count = rn;
+    this.rings.instanceMatrix.needsUpdate = true;
 
     for (const f of this.figures) f.update(dt, alpha);
     this.hero.update(w.hero, dt, alpha);

@@ -8,6 +8,7 @@ import { Stage } from './render/Stage.js';
 import { Units } from './render/Units.js';
 import { World } from './sim/world.js';
 import { Hud, showTitle } from './ui/hud.js';
+import { Rts } from './ui/rts.js';
 
 const params = new URLSearchParams(location.search);
 const STEP = 1 / 30;
@@ -23,10 +24,11 @@ stage.bindMap(level.grid);
 const diorama = new Diorama(level, stage.scene);
 const units = new Units(world, stage);
 const atmosphere = new Atmosphere(world, stage);
-const hud = new Hud(document.getElementById('ui'), world, {
-  onPrompt: () => script.action(),
-  onBuy: (kind) => world.buy(kind),
-});
+const hud = new Hud(document.getElementById('ui'), world, stage);
+const rts = new Rts(world, stage, hud);
+units.selection = rts.sel;
+hud.handlers = { action: (name) => rts.action(name), prompt: () => script.action() };
+hud.setSelection([], null);
 
 const p = level.points;
 const presets = {
@@ -56,73 +58,6 @@ world.bus.on('levelComplete', () => {
 
 const sound = new Sound(world, stage, script);
 
-// Управление.
-const canvas = stage.renderer.domElement;
-let held = false;
-let panning = false;
-let lastX = 0;
-let lastY = 0;
-
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('pointerdown', (e) => {
-  lastX = e.clientX;
-  lastY = e.clientY;
-  if (e.button !== 0) {
-    panning = true;
-    return;
-  }
-  held = true;
-  const hit = stage.pick(e.clientX, e.clientY);
-  if (hit) world.setMark(hit.x, hit.z, true);
-});
-window.addEventListener('pointerup', () => {
-  held = false;
-  panning = false;
-});
-window.addEventListener('pointermove', (e) => {
-  if (held && script.step !== 'idle') {
-    const hit = stage.pick(e.clientX, e.clientY);
-    if (hit) world.setMark(hit.x, hit.z);
-  }
-  if (panning && stage.rig.userPan) {
-    const k = stage.rig.dist * 0.0014;
-    stage.rig.goal.x -= (e.clientX - lastX) * k;
-    stage.rig.goal.z -= (e.clientY - lastY) * k;
-  }
-  lastX = e.clientX;
-  lastY = e.clientY;
-});
-canvas.addEventListener(
-  'wheel',
-  (e) => {
-    if (!stage.rig.userPan) return;
-    e.preventDefault();
-    stage.rig.goalDist = Math.max(2.5, Math.min(26, stage.rig.goalDist * (1 + Math.sign(e.deltaY) * 0.12)));
-  },
-  { passive: false },
-);
-
-const keys = new Set();
-window.addEventListener('keydown', (e) => {
-  keys.add(e.code);
-  if (e.code === 'Space') {
-    e.preventDefault();
-    script.action();
-  }
-  if (e.code === 'Digit1') world.buy('ling');
-  if (e.code === 'Digit2') world.buy('weaver');
-});
-window.addEventListener('keyup', (e) => keys.delete(e.code));
-
-function panKeys(dt) {
-  if (!stage.rig.userPan) return;
-  const v = stage.rig.dist * 0.8 * dt;
-  if (keys.has('KeyW') || keys.has('ArrowUp')) stage.rig.goal.z -= v;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) stage.rig.goal.z += v;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) stage.rig.goal.x -= v;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) stage.rig.goal.x += v;
-}
-
 let running = false;
 const speed = Number(params.get('speed')) || 1;
 let acc = 0;
@@ -140,7 +75,7 @@ function frame(now) {
       acc -= STEP;
     }
   }
-  panKeys(dt);
+  rts.update(dt);
   if (running && !window.__g.paused) sound.update(dt * speed);
   stage.update(dt);
   stage.updateMap(dt);
@@ -185,4 +120,4 @@ function advance(seconds) {
   stage.render(world);
 }
 
-Object.assign(window.__g, { world, stage, script, units, hud, advance, sound, paused: params.has('paused') });
+Object.assign(window.__g, { world, stage, script, units, hud, rts, advance, sound, paused: params.has('paused') });

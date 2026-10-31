@@ -104,6 +104,8 @@ function nearestVisibleSpider(world, h, range) {
     if (s.hidden || s.on) continue;
     const d = dist(h.x, h.z, s.x, s.z);
     if (d >= bestD) continue;
+    // Затаившегося паука замечают только вплотную.
+    if (s.order?.type === 'hide' && d > 0.55) continue;
     if (world.grid.litAt(s.x, s.z) < 0.28) continue;
     best = s;
     bestD = d;

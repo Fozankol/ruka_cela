@@ -1,13 +1,20 @@
 import { Bus, RNG, clamp, dist } from '../core/util.js';
 import { bakeStaticLight, composeLight } from './light.js';
-import { isDown, makeHuman, tickHuman } from './humans.js';
+import { makeHuman, tickHuman } from './humans.js';
 
 export const SPIDERS = {
-  hero: { name: 'Каракурт', speed: 1.25, scale: 0.17 },
-  ling: { name: 'Паучок', speed: 0.85, scale: 0.075, cost: 6, key: '1', desc: 'Ловит и кусает' },
-  weaver: { name: 'Ткач', speed: 0.6, scale: 0.09, cost: 14, key: '2', desc: 'Плетёт паутину' },
+  hero: { name: 'Мать', speed: 1.25, scale: 0.17, hp: 8, bite: 4, supply: 0 },
+  ling: { name: 'Паучок', speed: 0.85, scale: 0.075, hp: 1, bite: 1, supply: 1, cost: 6, time: 3.5, key: 'Z', desc: 'Кусает, носит добычу, грызёт провода' },
+  weaver: { name: 'Ткач', speed: 0.6, scale: 0.09, hp: 1, bite: 0, supply: 2, cost: 14, time: 6, key: 'X', desc: 'Плетёт паутину там, где стоит. Даёт шёлк' },
 };
 
+export const NEST_COST = 25;
+export const NEST_TIME = 7;
+const SUPPLY_BASE = 6;
+const SUPPLY_PER_NEST = 12;
+const WEAVE_RADIUS = 1.2;
+const FLY_SOKI = 3;
+const COCOON_LOAD = 5;
 const STEP = { x: 0, z: 0 };
 
 export class World {
@@ -18,11 +25,11 @@ export class World {
     this.bus = new Bus();
     this.t = 0;
     this.res = { silk: 0, soki: 0 };
-    this.stats = { bites: 0, clicks: 0, started: 0 };
-    this.alarm = 0;
+    this.stats = { bites: 0, clicks: 0, flies: 0, gathered: 0 };
     this.biteRate = 0.028;
     this.spiders = [];
     this.flies = [];
+    this.food = null;
     this.nests = [];
     this.cocoons = [];
     this.webList = [];
@@ -37,12 +44,15 @@ export class World {
     this.flags = { resources: false, swarmBar: false, evolution: false };
     this.goal = null;
     this.wire = null;
-    this.slippers = [];
     this.senseT = 0;
     this.lightT = 0;
     this.lightDirty = true;
     this.hero = null;
-    for (const r of [1]) this.revealRoom(r);
+    this.rts = false;
+    this.selectedCount = 0;
+    this.hunt = new Map();
+    this.freeT = 0;
+    this.revealRoom(1);
     this.bakeLight();
   }
 
@@ -74,7 +84,7 @@ export class World {
 
   blackout() {
     for (const l of this.lights) {
-      if (!l.moon && !l.dynamic && l.on) {
+      if (!l.moon && !l.dynamic && l.warm && l.on) {
         l.on = false;
         this.bus.emit('lamp', { id: l.id, on: false, light: l });
       }
@@ -101,6 +111,7 @@ export class World {
   }
 
   spawn(kind, x, z) {
+    const def = SPIDERS[kind];
     const s = {
       id: this.nextId++,
       kind,
@@ -109,15 +120,13 @@ export class World {
       px: x,
       pz: z,
       y: 0,
+      hp: def.hp,
       dir: this.rng.range(-3.14, 3.14),
-      ox: this.rng.range(-1, 1),
-      oz: this.rng.range(-1, 1),
-      job: null,
+      order: null,
       on: null,
+      load: 0,
       climb: this.rng.next(),
       ang: this.rng.range(0, 6.28),
-      thinkT: this.rng.range(0, 0.3),
-      wanderT: 0,
       moving: false,
       hidden: false,
       moveSeed: this.rng.next(),
@@ -142,20 +151,83 @@ export class World {
     return this.spiders.length;
   }
 
-  buy(kind) {
-    const def = SPIDERS[kind];
-    const nest = this.nests[0];
-    if (!def || !nest || this.res.soki < def.cost) return false;
-    this.res.soki -= def.cost;
-    const s = this.spawn(kind, nest.x + this.rng.range(-0.2, 0.2), nest.z + this.rng.range(-0.2, 0.2));
-    this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.5, kind: 'hatch' });
-    return true;
+  supplyUsed() {
+    let n = 0;
+    for (const s of this.spiders) n += SPIDERS[s.kind].supply;
+    for (const nest of this.nests) for (const q of nest.queue) n += SPIDERS[q.kind].supply;
+    return n;
   }
 
-  addNest(x, z) {
-    this.nests.push({ x, z });
+  supplyCap() {
+    const built = this.nests.filter((n) => n.built >= 1).length;
+    return built ? SUPPLY_BASE + built * SUPPLY_PER_NEST : 0;
+  }
+
+  // Заказ на рождение: соки списываются сразу, паук выходит из свободного гнезда.
+  train(kind) {
+    const def = SPIDERS[kind];
+    if (!def?.cost || this.res.soki < def.cost) return 'Не хватает соков';
+    if (this.supplyUsed() + def.supply > this.supplyCap()) return 'Рою тесно. Нужно новое гнездо';
+    const ready = this.nests.filter((n) => n.built >= 1);
+    if (!ready.length) return 'Нет гнезда';
+    ready.sort((a, b) => a.queue.length - b.queue.length);
+    this.res.soki -= def.cost;
+    ready[0].queue.push({ kind, left: def.time, total: def.time });
+    return null;
+  }
+
+  addNest(x, z, built = 1) {
+    const n = { x, z, built, queue: [], field: this.grid.flow(x, z, 'spider') };
+    this.nests.push(n);
     this.seedWeb(x, z, 3);
-    this.bus.emit('nest', { x, z });
+    this.bus.emit('nest', n);
+    return n;
+  }
+
+  nearestNest(s) {
+    let best = null;
+    let bestD = Infinity;
+    for (const n of this.nests) {
+      if (n.built < 1) continue;
+      const d = dist(s.x, s.z, n.x, n.z);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  updateNests(dt) {
+    for (const n of this.nests) {
+      const q = n.queue[0];
+      if (!q) continue;
+      q.left -= dt;
+      if (q.left > 0) continue;
+      n.queue.shift();
+      const s = this.spawn(q.kind, n.x + this.rng.range(-0.2, 0.2), n.z + 0.15 + this.rng.range(0, 0.2));
+      this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.5, kind: 'hatch' });
+      this.bus.emit('trained', s);
+      if (n.rally) this.command([s], { type: 'move', x: n.rally.x, z: n.rally.z });
+    }
+    // Даже после полного разгрома рой не исчезает: кладка понемногу даёт паучка даром.
+    if (this.rts && this.nests.length && this.count('ling') === 0 && this.res.soki < SPIDERS.ling.cost) {
+      this.freeT += dt;
+      if (this.freeT > 14) {
+        this.freeT = 0;
+        const n = this.nests[0];
+        this.spawn('ling', n.x, n.z + 0.2);
+      }
+    }
+    if (this.rts && !this.hero && this.nests.length) {
+      this.heroT = (this.heroT ?? 30) - dt;
+      if (this.heroT <= 0) {
+        this.heroT = 30;
+        const n = this.nests[0];
+        this.spawn('hero', n.x, n.z + 0.2);
+        this.bus.emit('radio', { who: 'Рой', text: 'Новая мать выбралась из кокона.' });
+      }
+    }
   }
 
   seedWeb(x, z, r) {
@@ -173,6 +245,7 @@ export class World {
     }
   }
 
+  // Вступление: у игрока только Мать, и она ползёт туда, куда указали.
   setMark(x, z, fromClick = false) {
     if (fromClick) this.stats.clicks++;
     if (!this.mark) this.mark = { x, z };
@@ -192,9 +265,9 @@ export class World {
     }
   }
 
-  moveAlongField(s, speed, dt) {
-    if (!this.markField) return false;
-    if (!this.grid.nextStep(this.markField, s.x, s.z, STEP)) {
+  followField(s, field, speed, dt) {
+    if (!field) return false;
+    if (!this.grid.nextStep(field, s.x, s.z, STEP)) {
       if (!this.grid.spiderOk(this.grid.at(s.x, s.z))) this.grid.snapSpider(s);
       return false;
     }
@@ -206,7 +279,8 @@ export class World {
     const dz = tz - s.z;
     const d = Math.hypot(dx, dz);
     if (d < 1e-4) return true;
-    const v = Math.min(speed * dt, d);
+    const web = this.grid.web[this.grid.at(s.x, s.z)];
+    const v = Math.min(speed * (1 + web * 0.3) * dt, d);
     s.x += (dx / d) * v;
     s.z += (dz / d) * v;
     s.dir = Math.atan2(dz, dx);
@@ -214,18 +288,78 @@ export class World {
     return d <= v + 0.01;
   }
 
-  // Пауки идут к метке и по пути сами находят добычу.
+  // Точка в кольцах вокруг цели, чтобы группа вставала строем, а не в одну кучу.
+  slot(x, z, i) {
+    const a = i * 2.4;
+    const r = 0.1 * Math.sqrt(i);
+    const px = x + Math.cos(a) * r;
+    const pz = z + Math.sin(a) * r;
+    return this.grid.spiderOk(this.grid.at(px, pz)) ? { x: px, z: pz } : { x, z };
+  }
+
+  // Единая точка входа для всех приказов игрока.
+  command(list, cmd) {
+    if (!list.length) return;
+    const units = list.filter((s) => this.spiders.includes(s));
+    const field = cmd.x !== undefined ? this.grid.flow(cmd.x, cmd.z, 'spider') : null;
+    units.forEach((s, i) => {
+      if (s.on) this.detach(s);
+      this.releaseFly(s);
+      switch (cmd.type) {
+        case 'stop':
+          s.order = null;
+          break;
+        case 'hide':
+          s.order = { type: 'hide' };
+          break;
+        case 'move':
+        case 'amove': {
+          const p = this.slot(cmd.x, cmd.z, i);
+          s.order = { type: cmd.type, x: p.x, z: p.z, field };
+          break;
+        }
+        case 'attack':
+          // Ткачи не кусаются: они подходят и остаются рядом.
+          if (SPIDERS[s.kind].bite > 0) s.order = { type: 'attack', h: cmd.h };
+          else s.order = { type: 'move', x: cmd.h.x, z: cmd.h.z, field: this.grid.flow(cmd.h.x, cmd.h.z, 'spider') };
+          break;
+        case 'gnaw':
+          if (s.kind === 'ling') s.order = { type: 'gnaw' };
+          break;
+        case 'gather':
+          if (s.kind === 'ling') s.order = { type: 'gather', src: cmd.src, c: cmd.c, phase: s.load > 0 ? 'back' : 'go', fly: null };
+          break;
+        case 'nest':
+          if (s.kind === 'hero') s.order = { type: 'nest', x: cmd.x, z: cmd.z, field };
+          break;
+        default:
+          break;
+      }
+    });
+  }
+
+  huntField(h) {
+    let c = this.hunt.get(h);
+    if (!c || this.t - c.t > 0.5) {
+      c = { t: this.t, field: this.grid.flow(h.x, h.z, 'spider') };
+      this.hunt.set(h, c);
+    }
+    return c.field;
+  }
+
+  canBite(h) {
+    return h.huntable && !['cocoon', 'gone', 'still'].includes(h.state);
+  }
+
   stepSpider(s, dt) {
     s.px = s.x;
     s.pz = s.z;
     s.moving = false;
     if (s.hidden) return;
     const def = SPIDERS[s.kind];
-    if (s.kind === 'hero') {
-      if (this.heroLocked) return;
-      if (this.mark) {
-        const d = dist(s.x, s.z, this.mark.x, this.mark.z);
-        if (d > 0.05) this.moveAlongField(s, def.speed, dt);
+    if (s.kind === 'hero' && !this.rts) {
+      if (!this.heroLocked && this.mark && dist(s.x, s.z, this.mark.x, this.mark.z) > 0.05) {
+        this.followField(s, this.markField, def.speed, dt);
       }
       return;
     }
@@ -233,136 +367,184 @@ export class World {
       this.stepAttached(s, dt);
       return;
     }
-    s.thinkT -= dt;
-    if (s.thinkT <= 0 && !s.job) {
-      s.thinkT = 0.3;
-      this.findJob(s);
-    }
-    if (s.job) {
-      this.stepJob(s, def, dt);
-      return;
-    }
-    if (s.kind === 'weaver') {
-      this.wander(s, this.nests[0] ?? s, 0.7, def, dt);
-      return;
-    }
-    if (this.mark) {
-      const d = dist(s.x, s.z, this.mark.x, this.mark.z);
-      const spread = 0.25 + Math.sqrt(this.spiders.length) * 0.05;
-      if (d > spread * 1.6) {
-        this.moveAlongField(s, def.speed * (0.85 + s.moveSeed * 0.3), dt);
-      } else {
-        this.wander(s, this.mark, spread, def, dt);
-      }
-    } else if (this.nests[0]) {
-      this.wander(s, this.nests[0], 0.6, def, dt);
+    const o = s.order;
+    if (!o) return;
+    switch (o.type) {
+      case 'move':
+      case 'amove':
+        this.stepMove(s, o, def, dt);
+        break;
+      case 'attack':
+        this.stepAttack(s, o, def, dt);
+        break;
+      case 'gnaw':
+        this.stepGnaw(s, def, dt);
+        break;
+      case 'gather':
+        this.stepGather(s, o, def, dt);
+        break;
+      case 'nest':
+        this.stepBuild(s, o, def, dt);
+        break;
+      default:
+        break;
     }
   }
 
-  wander(s, c, r, def, dt) {
-    s.wanderT -= dt;
-    if (s.wanderT <= 0) {
-      s.wanderT = this.rng.range(0.6, 2.4);
-      s.wx = c.x + this.rng.range(-r, r);
-      s.wz = c.z + this.rng.range(-r, r);
-      s.pause = this.rng.next() < 0.45;
-    }
-    if (s.pause) return;
-    if (!this.grid.spiderOk(this.grid.at(s.wx, s.wz))) {
-      s.wanderT = 0;
-      return;
-    }
-    const nx = s.x + (s.wx - s.x) * 0.02;
-    const nz = s.z + (s.wz - s.z) * 0.02;
-    if (!this.grid.spiderOk(this.grid.at(nx, nz))) {
-      s.wanderT = 0;
-      return;
-    }
-    if (this.steer(s, s.wx, s.wz, def.speed * 0.55, dt)) s.pause = true;
-  }
-
-  findJob(s) {
-    if (s.kind !== 'ling') return;
-    const near = this.mark && dist(s.x, s.z, this.mark.x, this.mark.z) < 1.6;
-    if (this.wire && !this.wire.done) {
-      // Считаем путь, а не расстояние: паук за стеной провод не достанет.
-      const steps = this.wire.field[this.grid.at(s.x, s.z)];
-      if (steps >= 0 && steps < 22) {
-        s.job = { type: 'wire' };
-        return;
-      }
-    }
-    for (const f of this.flies) {
-      if (!f.taken && dist(s.x, s.z, f.x, f.z) < 1.3) {
-        f.taken = true;
-        s.job = { type: 'fly', fly: f };
-        return;
-      }
-    }
-    for (const h of this.humans) {
-      if (!h.huntable || h.state === 'cocoon' || h.state === 'gone' || h.state === 'still') continue;
-      if (dist(s.x, s.z, h.x, h.z) < (near ? 2.4 : 1.3)) {
-        s.job = { type: 'human', h, field: this.grid.flow(h.x, h.z, 'spider'), t: 0 };
-        return;
-      }
-    }
-  }
-
-  stepJob(s, def, dt) {
-    const job = s.job;
-    if (job.type === 'fly') {
-      const f = job.fly;
-      if (!this.flies.includes(f)) {
-        s.job = null;
-        return;
-      }
-      if (this.steer(s, f.x, f.z, def.speed * 1.3, dt)) {
-        this.flies = this.flies.filter((o) => o !== f);
-        this.res.soki += 3;
-        this.stats.flies = (this.stats.flies ?? 0) + 1;
-        this.bus.emit('ripple', { x: f.x, z: f.z, power: 0.35, kind: 'bite' });
-        this.bus.emit('flyEaten', f);
-        s.job = null;
-      }
-    } else if (job.type === 'wire') {
-      if (!this.wire || this.wire.done) {
-        s.job = null;
-        return;
-      }
-      const w = this.wire;
-      const steps = w.field[this.grid.at(s.x, s.z)];
-      if (steps > 3 && this.grid.nextStep(w.field, s.x, s.z, STEP)) {
-        this.steer(s, STEP.x, STEP.z, def.speed, dt);
-      } else if (this.steer(s, w.x + s.ox * 0.2, w.z + s.oz * 0.12, def.speed, dt)) {
-        w.progress += dt * w.rate;
-        w.chew = (w.chew ?? 0) - dt;
-        if (w.chew <= 0) {
-          w.chew = 0.35;
-          this.bus.emit('ripple', { x: w.x, z: w.z, power: 0.45, kind: 'bite' });
+  stepMove(s, o, def, dt) {
+    if (o.type === 'amove') {
+      o.look = (o.look ?? this.rng.next() * 0.3) - dt;
+      if (o.look <= 0) {
+        o.look = 0.3;
+        for (const h of this.humans) {
+          if (this.canBite(h) && dist(s.x, s.z, h.x, h.z) < 1.8) {
+            s.order = { type: 'attack', h };
+            return;
+          }
         }
       }
-    } else if (job.type === 'human') {
-      const h = job.h;
-      job.t += dt;
-      if (isDown(h) && h.state !== 'para' && h.state !== 'wrap') {
-        s.job = null;
-        return;
-      }
-      if (dist(s.x, s.z, h.x, h.z) < 0.34 || (h.lie > 0.5 && dist(s.x, s.z, h.x, h.z - 0.8) < 0.95)) {
-        s.on = h;
-        s.job = null;
-        s.ang = this.rng.range(0, 6.28);
-        h.attached++;
-        this.stats.bites++;
-        return;
-      }
-      if (job.t > 1.2) {
-        job.t = 0;
-        job.field = this.grid.flow(h.x, h.z, 'spider');
-      }
-      if (this.grid.nextStep(job.field, s.x, s.z, STEP)) this.steer(s, STEP.x, STEP.z, def.speed * 1.1, dt);
-      else s.job = null;
     }
+    const d = dist(s.x, s.z, o.x, o.z);
+    if (d < 0.05) {
+      s.order = null;
+      return;
+    }
+    const steps = o.field[this.grid.at(s.x, s.z)];
+    if (steps >= 0 && steps <= 3) {
+      if (this.steer(s, o.x, o.z, def.speed, dt)) s.order = null;
+    } else {
+      this.followField(s, o.field, def.speed, dt);
+    }
+  }
+
+  stepAttack(s, o, def, dt) {
+    const h = o.h;
+    if (!this.canBite(h)) {
+      s.order = null;
+      return;
+    }
+    if (dist(s.x, s.z, h.x, h.z) < 0.34 || (h.lie > 0.5 && dist(s.x, s.z, h.x, h.z - 0.8) < 0.95)) {
+      s.on = h;
+      s.order = null;
+      s.ang = this.rng.range(0, 6.28);
+      h.attached += def.bite;
+      this.stats.bites++;
+      return;
+    }
+    this.followField(s, this.huntField(h), def.speed * 1.1, dt);
+  }
+
+  stepGnaw(s, def, dt) {
+    const w = this.wire;
+    if (!w || w.done) {
+      s.order = null;
+      return;
+    }
+    const steps = w.field[this.grid.at(s.x, s.z)];
+    if (steps > 3 && this.grid.nextStep(w.field, s.x, s.z, STEP)) {
+      this.steer(s, STEP.x, STEP.z, def.speed, dt);
+    } else if (this.steer(s, w.x + Math.cos(s.ang) * 0.2, w.z + Math.sin(s.ang) * 0.12, def.speed, dt)) {
+      w.progress += dt * w.rate;
+      w.chew = (w.chew ?? 0) - dt;
+      if (w.chew <= 0) {
+        w.chew = 0.35;
+        this.bus.emit('ripple', { x: w.x, z: w.z, power: 0.45, kind: 'bite' });
+      }
+    }
+  }
+
+  // Паучок ходит между добычей и гнездом, пока не получит другой приказ.
+  stepGather(s, o, def, dt) {
+    if (o.phase === 'back') {
+      const n = this.nearestNest(s);
+      if (!n) {
+        s.order = null;
+        return;
+      }
+      if (dist(s.x, s.z, n.x, n.z) < 0.4) {
+        this.res.soki += s.load;
+        this.stats.gathered += s.load;
+        s.load = 0;
+        o.phase = 'go';
+        this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.25, kind: 'hatch' });
+        return;
+      }
+      this.followField(s, n.field, def.speed * 0.9, dt);
+      return;
+    }
+    if (o.src === 'cocoon') {
+      const c = o.c;
+      if (c.left <= 0) {
+        s.order = null;
+        return;
+      }
+      if (dist(s.x, s.z, c.x, c.z) < 0.6) {
+        const v = Math.min(COCOON_LOAD, c.left);
+        c.left -= v;
+        s.load = v;
+        o.phase = 'back';
+        return;
+      }
+      this.followField(s, c.field, def.speed, dt);
+      return;
+    }
+    if (o.fly && !this.flies.includes(o.fly)) o.fly = null;
+    if (!o.fly) {
+      let best = null;
+      let bestD = Infinity;
+      for (const f of this.flies) {
+        if (f.taken) continue;
+        const d = dist(s.x, s.z, f.x, f.z);
+        if (d < bestD) {
+          bestD = d;
+          best = f;
+        }
+      }
+      if (best) {
+        best.taken = true;
+        o.fly = best;
+      }
+    }
+    const atFood = this.food && dist(s.x, s.z, this.food.x, this.food.z) < 1.1;
+    if (o.fly && atFood) {
+      if (this.steer(s, o.fly.x, o.fly.z, def.speed * 1.2, dt)) {
+        this.flies = this.flies.filter((f) => f !== o.fly);
+        this.stats.flies++;
+        this.bus.emit('ripple', { x: o.fly.x, z: o.fly.z, power: 0.35, kind: 'bite' });
+        this.bus.emit('flyEaten', o.fly);
+        o.fly = null;
+        s.load = FLY_SOKI;
+        o.phase = 'back';
+      }
+    } else if (this.food && !atFood) {
+      this.followField(s, this.food.field, def.speed, dt);
+    }
+  }
+
+  // Мать садится и строит гнездо. Шёлк списывается в момент начала.
+  stepBuild(s, o, def, dt) {
+    if (dist(s.x, s.z, o.x, o.z) > 0.2) {
+      this.followField(s, o.field, def.speed, dt);
+      return;
+    }
+    if (!o.nest) {
+      if (this.res.silk < NEST_COST) {
+        s.order = null;
+        this.bus.emit('notice', 'Нужно больше шёлка');
+        return;
+      }
+      this.res.silk -= NEST_COST;
+      o.nest = this.addNest(o.x, o.z, 0);
+    }
+    o.nest.built = Math.min(1, o.nest.built + dt / NEST_TIME);
+    if (o.nest.built >= 1) {
+      s.order = null;
+      this.bus.emit('notice', 'Гнездо готово. Рою просторнее');
+    }
+  }
+
+  releaseFly(s) {
+    if (s.order?.fly) s.order.fly.taken = false;
   }
 
   stepAttached(s, dt) {
@@ -388,24 +570,25 @@ export class World {
   }
 
   detach(s) {
-    if (s.on) s.on.attached = Math.max(0, s.on.attached - 1);
+    if (s.on) s.on.attached = Math.max(0, s.on.attached - SPIDERS[s.kind].bite);
     s.on = null;
     s.y = 0;
-    if (!this.grid.spiderOk(this.grid.at(s.x, s.z))) {
-      const n = this.nests[0] ?? this.mark;
-      if (n) {
-        s.x = n.x;
-        s.z = n.z;
-      }
-    }
+    if (!this.grid.spiderOk(this.grid.at(s.x, s.z))) this.grid.snapSpider(s);
     s.px = s.x;
     s.pz = s.z;
   }
 
+  damage(s, n = 1) {
+    s.hp -= n;
+    if (s.hp <= 0) this.killSpider(s);
+  }
+
   killSpider(s) {
     if (s.on) this.detach(s);
+    this.releaseFly(s);
     this.spiders = this.spiders.filter((o) => o !== s);
     this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.4, kind: 'death' });
+    this.bus.emit('spiderDead', s);
     if (s === this.hero) {
       this.hero = null;
       this.bus.emit('heroDead');
@@ -415,7 +598,7 @@ export class World {
   swat(h) {
     for (const s of this.spiders) {
       if (s.on === h) {
-        this.killSpider(s);
+        this.damage(s, 1);
         return;
       }
     }
@@ -426,12 +609,14 @@ export class World {
     this.bus.emit('slipper', { x, z, phase: 'hit', life: 0.3 });
     this.bus.emit('ripple', { x, z, power: 1.6, kind: 'stomp' });
     this.bus.emit('shake', 0.9);
-    // Тапок давит не больше трёх: иначе один удар сносил бы весь рой в тесной комнате.
+    // Тапок давит не больше трёх: иначе один удар сносил бы всю группу в тесной комнате.
     let kills = 0;
     for (const s of [...this.spiders]) {
       if (s.hidden || s.on || dist(s.x, s.z, x, z) >= r) continue;
-      if (s.kind === 'hero' || kills < 3) {
-        this.killSpider(s);
+      if (s.kind === 'hero') {
+        this.damage(s, this.rts ? 3 : 99);
+      } else if (kills < 3) {
+        this.damage(s, 1);
         kills++;
       }
     }
@@ -442,7 +627,10 @@ export class World {
   }
 
   onCocoon(h) {
-    this.cocoons.push({ x: h.x, z: h.z, lie: h.lie > 0.5, h, left: 40 });
+    const lying = h.lie > 0.5;
+    const c = { x: h.x, z: lying ? h.z - h.height * 0.46 : h.z, lie: lying, h, left: 40 };
+    c.field = this.grid.flow(c.x, c.z, 'spider');
+    this.cocoons.push(c);
     this.level.population -= 1;
     this.dread = (this.dread ?? 0) + 0.12;
     this.bus.emit('human', { h, event: 'cocoon' });
@@ -458,52 +646,38 @@ export class World {
       f.z = f.cz + Math.sin(f.a * 1.3) * f.r;
       f.y = 0.1 + Math.abs(Math.sin(f.a * 2.1)) * 0.35;
     }
-    for (const c of this.cocoons) {
-      if (c.left > 0) {
-        const v = Math.min(c.left, dt * 2.2);
-        c.left -= v;
-        this.res.soki += v;
-      }
-    }
   }
 
   addFly(cx, cz) {
     this.flies.push({ cx, cz, x: cx, z: cz, y: 0.2, a: this.rng.range(0, 6), r: this.rng.range(0.1, 0.42), w: this.rng.range(1.6, 3), taken: false });
   }
 
+  // Ткач плетёт вокруг себя, пока стоит без приказа.
   updateWeb(dt) {
     const g = this.grid;
-    if (!this.webList.length) return;
-    const weavers = this.count('weaver');
-    const budget = (0.3 * this.nests.length + weavers * 1.1) * dt * 24;
-    let n = Math.floor(budget + this.rng.next());
-    while (n-- > 0) {
-      const i = this.webList[Math.floor(this.rng.next() * this.webList.length)];
-      const cx = i % g.w;
-      const cz = (i - cx) / g.w;
-      const side = this.rng.int(0, 3);
-      const nx = cx + (side === 0 ? 1 : side === 1 ? -1 : 0);
-      const nz = cz + (side === 2 ? 1 : side === 3 ? -1 : 0);
-      if (!g.inb(nx, nz)) continue;
-      const ni = g.idx(nx, nz);
-      if (!g.spiderOk(ni) || g.lit(ni) > 0.3) continue;
-      if (g.web[ni] === 0) this.webList.push(ni);
-      g.web[ni] = Math.min(1, g.web[ni] + 0.34);
+    let weavers = 0;
+    for (const s of this.spiders) {
+      if (s.kind !== 'weaver') continue;
+      weavers++;
+      if (s.order || s.hidden) continue;
+      let n = Math.floor(dt * 34 + this.rng.next());
+      const r = WEAVE_RADIUS / g.cell;
+      const cx = g.cx(s.x);
+      const cz = g.cz(s.z);
+      while (n-- > 0) {
+        const a = this.rng.range(0, 6.283);
+        const q = Math.sqrt(this.rng.next()) * r;
+        const nx = cx + Math.round(Math.cos(a) * q);
+        const nz = cz + Math.round(Math.sin(a) * q);
+        if (!g.inb(nx, nz)) continue;
+        const i = g.idx(nx, nz);
+        if (!g.spiderOk(i) || g.lit(i) > 0.3) continue;
+        if (g.web[i] === 0) this.webList.push(i);
+        g.web[i] = Math.min(1, g.web[i] + 0.3);
+      }
     }
-    this.res.silk += dt * (0.3 * this.nests.length + weavers * 0.5 + this.count('ling') * 0.03 + this.webList.length * 0.0012);
-    this.hatchFromNests(dt);
-  }
-
-  // Гнёзда сами выводят паучат за шёлк: рой восстанавливается и после разгрома.
-  hatchFromNests(dt) {
-    this.nestT = (this.nestT ?? 0) - dt;
-    if (this.nestT > 0 || !this.nests.length) return;
-    this.nestT = 5 / this.nests.length;
-    if (this.res.silk < 3 || this.count('ling') >= 30) return;
-    this.res.silk -= 3;
-    const n = this.nests[Math.floor(this.rng.next() * this.nests.length)];
-    const s = this.spawn('ling', n.x + this.rng.range(-0.15, 0.15), n.z + this.rng.range(-0.15, 0.15));
-    this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.4, kind: 'hatch' });
+    const built = this.nests.filter((n) => n.built >= 1).length;
+    this.res.silk += dt * (0.25 * built + weavers * 0.55);
   }
 
   updateSense(dt) {
@@ -535,24 +709,25 @@ export class World {
     for (let k = 0; k < this.spiders.length; k += step) stampR(this.spiders[k], 14);
     for (const h of this.humans) {
       const i = g.at(h.x, h.z);
-      const target = h.state === 'gone' ? 0 : h.state === 'still' ? 0 : sense[i] > 0.5 || g.lit(i) > 0.2 ? 1 : 0;
-      h.fadeTarget = target;
+      h.fadeTarget = h.state === 'gone' || h.state === 'still' ? 0 : sense[i] > 0.5 || g.lit(i) > 0.2 ? 1 : 0;
     }
   }
 
   tick(dt) {
     this.t += dt;
     this.updateMarkField(dt);
-    for (const s of this.spiders) this.stepSpider(s, dt);
+    for (const s of [...this.spiders]) this.stepSpider(s, dt);
     for (const h of this.humans) tickHuman(this, h, dt);
     this.updateFlies(dt);
     this.updateWeb(dt);
-    if (this.wire && !this.wire.done && this.wire.progress >= 1) {
-      this.wire.done = true;
-      for (const s of this.spiders) if (s.job?.type === 'wire') s.job = null;
-    }
+    this.updateNests(dt);
+    if (this.wire && !this.wire.done && this.wire.progress >= 1) this.wire.done = true;
     this.lightT -= dt;
-    if (this.lightDirty) bakeStaticLight(this.grid, this.lights), (this.lightDirty = false), (this.lightT = 0);
+    if (this.lightDirty) {
+      bakeStaticLight(this.grid, this.lights);
+      this.lightDirty = false;
+      this.lightT = 0;
+    }
     if (this.lightT <= 0) {
       this.lightT = 0.08;
       composeLight(this.grid, this.lights);

@@ -104,18 +104,22 @@ export class HouseScript {
       w.setObjective('');
       w.bus.emit('fade', { hold: 2400, text: 'Третья ночь.' });
     },
+    select: () => {
+      this.w.setObjective('Рой родился. Зажми левую кнопку мыши и обведи паучат рамкой.');
+    },
     flies: () => {
       const { w, p } = this;
       for (let i = 0; i < 8; i++) w.addFly(p.plate.x + w.rng.range(-0.3, 0.3), p.plate.z + w.rng.range(-0.3, 0.3));
       w.setBeacon(p.plate);
-      w.setObjective('Рой хочет есть. Кликни под кровать: там мухи.');
+      w.setObjective('Рою нужны соки. Нажми правой кнопкой по мухам у тарелки: паучки будут носить их в гнездо.');
     },
     breed: () => {
       const { w } = this;
       w.setBeacon(null);
       w.flags.swarmBar = true;
       w.bus.emit('flags', w.flags);
-      w.setObjective('Выведи ещё паучат: клавиша 1. Нужно 14.');
+      w.setObjective('Соки пошли. Закажи паучат: клавиша Z или кнопка внизу. Нужно 14. Пусть часть продолжает носить мух.');
+      w.bus.emit('radio', { who: 'Рой', text: 'Ткач плетёт паутину там, где стоит. В ней люди вязнут.' });
     },
     wire: () => {
       const { w, p } = this;
@@ -123,7 +127,7 @@ export class HouseScript {
       this.wireShown = -1;
       w.setBeacon(p.wire);
       w.revealRoom(4);
-      w.setObjective('Люди живут светом. Перегрызи провод в коридоре.');
+      w.setObjective('Люди живут светом. Выдели паучат и нажми правой кнопкой по щитку в коридоре.');
     },
     dark: () => {
       const { w, h } = this;
@@ -149,7 +153,7 @@ export class HouseScript {
       h.grandpa.huntable = true;
       w.revealRoom(3);
       w.setBeacon(p.grandpa);
-      w.setObjective('Старик в дальней комнате не слышит. Он будет первым.');
+      w.setObjective('Старик в дальней комнате не слышит. Выдели группу и нажми правой кнопкой по нему.');
     },
     hunt: () => {
       const { w, h } = this;
@@ -160,7 +164,7 @@ export class HouseScript {
       h.mother.huntable = true;
       h.father.aggressive = true;
       h.mother.aggressive = true;
-      w.setObjective('Они знают. Плети паутину: в ней люди вязнут. Бери их по одному.');
+      w.setObjective('Они знают. Отправь паучков правой кнопкой к кокону за соками. Потом бери людей из темноты: фонарь видит только впереди.');
     },
     still: () => {
       const { w, h } = this;
@@ -296,11 +300,14 @@ export class HouseScript {
         if (this.t > 1.2 && !this.hatched) this.hatchNow();
         if (this.t > 3.6) {
           w.bus.emit('radio', { who: 'Рой', text: 'Восемь. Голодные.' });
-          this.go('flies');
+          this.go('select');
         }
         break;
+      case 'select':
+        if (w.selectedCount >= 3) this.go('flies');
+        break;
       case 'flies':
-        if ((w.stats.flies ?? 0) >= 5) this.go('breed');
+        if (w.stats.gathered >= 3) this.go('breed');
         break;
       case 'breed':
         if (w.swarmCount() >= 14) this.go('wire');
@@ -412,12 +419,23 @@ export class HouseScript {
     this.hatched = true;
     if (w.hero) w.hero.hidden = false;
     w.addNest(p.crack.x, p.crack.z + 0.05);
-    for (let i = 0; i < 8; i++) w.spawn('ling', p.crack.x + w.rng.range(-0.2, 0.2), p.crack.z + 0.1 + w.rng.range(0, 0.2));
+    for (let i = 0; i < 8; i++) w.spawn('ling', p.crack.x - 0.4 + w.rng.range(-0.25, 0.25), p.crack.z + 0.5 + w.rng.range(-0.1, 0.3));
+    if (w.hero) {
+      w.hero.x = p.crack.x - 0.9;
+      w.hero.z = p.crack.z + 0.75;
+      w.hero.px = w.hero.x;
+      w.hero.pz = w.hero.z;
+    }
     w.res.silk = 6;
     w.res.soki = 0;
     w.flags.resources = true;
     w.bus.emit('flags', w.flags);
-    w.setMark(p.crack.x - 0.2, p.crack.z + 0.5);
+    // С этого момента у игрока настоящая стратегия: без приказа никто не двигается.
+    w.rts = true;
+    w.mark = null;
+    w.markField = null;
+    w.markLimit = null;
+    w.food = { x: p.plate.x, z: p.plate.z, field: w.grid.flow(p.plate.x, p.plate.z, 'spider') };
     this.cam('room');
   }
 
@@ -425,16 +443,15 @@ export class HouseScript {
   debugSkip(step) {
     const { w, p, h } = this;
     w.spawn('hero', p.crack.x, p.crack.z);
-    w.setMark(p.crack.x, p.crack.z);
     this.hatchNow();
     w.res.soki = 300;
     w.flags.swarmBar = true;
     w.bus.emit('flags', w.flags);
-    if (step === 'flies') {
-      this.go('flies');
+    if (step === 'flies' || step === 'select') {
+      this.go(step);
       return;
     }
-    for (let i = 0; i < 14; i++) w.buy('ling');
+    for (let i = 0; i < 8; i++) w.spawn('ling', p.crack.x - 0.8, p.crack.z + 0.9);
     w.revealRoom(4);
     w.revealRoom(3);
     if (step === 'wire') {
