@@ -91,9 +91,11 @@ function rippleMaterial() {
       void main(){
         float d = length(vUv);
         float age = vRip.x;
-        float ring = exp(-pow((d - age * .94) / (.035 + age * .03), 2.));
-        float ring2 = exp(-pow((d - age * .62) / .03, 2.)) * .45;
-        float a = (ring + ring2) * (1. - age) * (1. - age) * vRip.y * smoothstep(1., .9, d);
+        float e1 = (d - age * .94) / (.035 + age * .03);
+        float e2 = (d - age * .62) / .03;
+        float ring = exp(-e1 * e1);
+        float ring2 = exp(-e2 * e2) * .45;
+        float a = (ring + ring2) * (1. - age) * (1. - age) * vRip.y * (1. - smoothstep(.9, 1., d));
         vec3 c = mix(vec3(.5, .72, 1.), vec3(1., .22, .12), vRip.z);
         gl_FragColor = vec4(c, a);
       }
@@ -153,7 +155,7 @@ export class Units {
         depthWrite: false,
         uniforms: { uA: { value: 0 } },
         vertexShader: 'varying vec2 vUv; void main(){ vUv = uv * 2. - 1.; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
-        fragmentShader: 'uniform float uA; varying vec2 vUv; void main(){ float d = length(vUv); gl_FragColor = vec4(.0, .0, .0, uA * smoothstep(1., .55, d) * .92); }',
+        fragmentShader: 'uniform float uA; varying vec2 vUv; void main(){ float d = length(vUv); gl_FragColor = vec4(.0, .0, .0, uA * (1. - smoothstep(.55, 1., d)) * .92); }',
       }),
     );
     this.shadow.rotation.x = -Math.PI / 2;

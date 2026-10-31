@@ -23,8 +23,9 @@ const DofShader = {
     float coc(float d){ return clamp(abs(d - uFocus) / uRange - .12, 0., 1.) * uMax; }
     void main(){
       vec4 c = texture2D(tDiffuse, vUv);
-      // Защита от случайного NaN: размытие растянуло бы его на весь кадр.
-      if (!(c.r == c.r && c.g == c.g && c.b == c.b && c.a == c.a)) c = vec4(0., 0., 0., 1.);
+      // Этот проход работает всегда: одна ошибочная точка иначе растеклась бы по кадру через свечение.
+      if (!(c.r == c.r && c.g == c.g && c.b == c.b && c.a == c.a) || c.r + c.g + c.b > 3000.) c = vec4(0., 0., 0., 1.);
+      c.rgb = min(c.rgb, vec3(40.));
       float d = c.a * ${FAR.toFixed(1)};
       float r0 = coc(d);
       vec3 sum = c.rgb;
@@ -36,7 +37,8 @@ const DofShader = {
         float a = float(i) * 2.39996 + rot;
         vec2 o = vec2(cos(a), sin(a) * uAspect) * sqrt(t) * r0;
         vec4 s = texture2D(tDiffuse, vUv + o);
-        if (!(s.r == s.r && s.g == s.g && s.b == s.b && s.a == s.a)) continue;
+        if (!(s.r == s.r && s.g == s.g && s.b == s.b && s.a == s.a) || s.r + s.g + s.b > 3000.) continue;
+        s.rgb = min(s.rgb, vec3(40.));
         float sd = s.a * ${FAR.toFixed(1)};
         float rs = coc(sd);
         // Резкий передний план не расплывается на фоне, а размытый заходит на резкий.
@@ -68,7 +70,7 @@ const GradeShader = {
       col.b = texture2D(tDiffuse, vUv - c * ab).b;
       // Тени уходят в синий, света остаются тёплыми.
       float l = dot(col, vec3(.3, .59, .11));
-      col = mix(col, col * vec3(.82, .96, 1.32), smoothstep(.35, .0, l) * .55);
+      col = mix(col, col * vec3(.82, .96, 1.32), (1. - smoothstep(.0, .35, l)) * .55);
       col = mix(vec3(l), col, 1.16);
       col *= 1. - smoothstep(.12, .68, r2) * .72;
       col += (rand(vUv * 913. + fract(uTime) * 37.) - .5) * .014;
@@ -195,7 +197,6 @@ export class Stage {
     const pr = q === 0 ? base : q < 3 ? Math.min(base, 1) : 0.8;
     this.renderer.setPixelRatio(pr);
     this.composer.setPixelRatio(pr);
-    this.dof.enabled = q < 2;
     this.bloom.enabled = q < 3;
     this.resize();
   }
@@ -421,7 +422,7 @@ export class Stage {
     const u = this.dof.uniforms;
     u.uFocus.value = r.dist;
     u.uRange.value = Math.max(0.5, r.dist * 0.75);
-    u.uMax.value = clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016);
+    u.uMax.value = this.quality < 2 ? clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016) : 0;
   }
 
   render(world) {

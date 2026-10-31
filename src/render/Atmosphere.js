@@ -39,7 +39,7 @@ function dustMaterial() {
       varying vec3 vC;
       void main(){
         float d = length(gl_PointCoord - .5) * 2.;
-        float a = smoothstep(1., .2, d) * vA * .34;
+        float a = (1. - smoothstep(.2, 1., d)) * vA * .34;
         gl_FragColor = vec4(vC * 2.2, a);
       }
     `,
@@ -69,7 +69,7 @@ function beamMaterial(color, strength) {
       varying vec3 vPos;
       ${noiseGLSL}
       void main(){
-        float edge = smoothstep(0., .22, vUv.x) * smoothstep(1., .78, vUv.x);
+        float edge = smoothstep(0., .22, vUv.x) * (1. - smoothstep(.78, 1., vUv.x));
         float along = pow(clamp(1. - vUv.y, 0., 1.), 1.5);
         float n = fbm(vPos.xz * 2.2 + vec2(uTime * .05, vPos.y * 1.3)) * .7 + .4;
         gl_FragColor = vec4(uColor, edge * along * n * uStrength);
@@ -129,7 +129,7 @@ function torchCone() {
       void main(){
         vec3 V = normalize(uCam - vPos);
         float facing = pow(abs(dot(normalize(vN), V)), 3.2);
-        float a = facing * pow(1. - vL, 2.4) * .13;
+        float a = facing * pow(clamp(1. - vL, 0., 1.), 2.4) * .13;
         gl_FragColor = vec4(.75, .86, 1.15, a);
       }
     `,

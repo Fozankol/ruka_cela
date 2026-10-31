@@ -284,9 +284,13 @@ export class World {
   findJob(s) {
     if (s.kind !== 'ling') return;
     const near = this.mark && dist(s.x, s.z, this.mark.x, this.mark.z) < 1.6;
-    if (this.wire && !this.wire.done && dist(s.x, s.z, this.wire.x, this.wire.z) < 0.9) {
-      s.job = { type: 'wire' };
-      return;
+    if (this.wire && !this.wire.done) {
+      // Считаем путь, а не расстояние: паук за стеной провод не достанет.
+      const steps = this.wire.field[this.grid.at(s.x, s.z)];
+      if (steps >= 0 && steps < 22) {
+        s.job = { type: 'wire' };
+        return;
+      }
     }
     for (const f of this.flies) {
       if (!f.taken && dist(s.x, s.z, f.x, f.z) < 1.3) {
@@ -325,8 +329,17 @@ export class World {
         s.job = null;
         return;
       }
-      if (this.steer(s, this.wire.x + s.ox * 0.14, this.wire.z + s.oz * 0.08, def.speed, dt)) {
-        this.wire.progress += dt * this.wire.rate;
+      const w = this.wire;
+      const steps = w.field[this.grid.at(s.x, s.z)];
+      if (steps > 3 && this.grid.nextStep(w.field, s.x, s.z, STEP)) {
+        this.steer(s, STEP.x, STEP.z, def.speed, dt);
+      } else if (this.steer(s, w.x + s.ox * 0.2, w.z + s.oz * 0.12, def.speed, dt)) {
+        w.progress += dt * w.rate;
+        w.chew = (w.chew ?? 0) - dt;
+        if (w.chew <= 0) {
+          w.chew = 0.35;
+          this.bus.emit('ripple', { x: w.x, z: w.z, power: 0.45, kind: 'bite' });
+        }
       }
     } else if (job.type === 'human') {
       const h = job.h;

@@ -119,7 +119,8 @@ export class HouseScript {
     },
     wire: () => {
       const { w, p } = this;
-      w.wire = { x: p.wire.x, z: p.wire.z, progress: 0, rate: 0.0085, done: false };
+      w.wire = { x: p.wire.x, z: p.wire.z, progress: 0, rate: 0.016, done: false, field: w.grid.flow(p.wire.x, p.wire.z, 'spider') };
+      this.wireShown = -1;
       w.setBeacon(p.wire);
       w.revealRoom(4);
       w.setObjective('Люди живут светом. Перегрызи провод в коридоре.');
@@ -304,9 +305,18 @@ export class HouseScript {
       case 'breed':
         if (w.swarmCount() >= 14) this.go('wire');
         break;
-      case 'wire':
-        if (w.wire.done) this.go('dark');
+      case 'wire': {
+        if (w.wire.done) {
+          this.go('dark');
+          break;
+        }
+        const pct = Math.floor(w.wire.progress * 20) * 5;
+        if (pct > 0 && pct !== this.wireShown) {
+          this.wireShown = pct;
+          w.setObjective('Рой грызёт провод: ' + pct + '%');
+        }
         break;
+      }
       case 'dark':
         if (this.t > 2 && !this.momUp) {
           this.momUp = true;
@@ -431,7 +441,7 @@ export class HouseScript {
       this.go('wire');
       return;
     }
-    w.wire = { x: p.wire.x, z: p.wire.z, progress: 1, rate: 0, done: true };
+    w.wire = { x: p.wire.x, z: p.wire.z, progress: 1, rate: 0, done: true, field: null };
     if (step === 'dark') {
       this.go('dark');
       return;

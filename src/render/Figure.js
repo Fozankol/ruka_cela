@@ -7,7 +7,8 @@ import { worldMaterial } from './worldMaterial.js';
 
 // Тело вращения по профилю. Профиль задаётся сверху вниз, ось Y вверх.
 function lathe(profile, s, flat = 1, seg = 14) {
-  const pts = profile.map(([r, y]) => new THREE.Vector2(r * s, y * s)).reverse();
+  // Точки идут снизу вверх, иначе тело получается вывернутым наизнанку.
+  const pts = profile.map(([r, y]) => new THREE.Vector2(r * s, y * s)).sort((a, b) => a.y - b.y);
   const g = new THREE.LatheGeometry(pts, seg);
   g.scale(1, 1, flat);
   g.computeVertexNormals();
