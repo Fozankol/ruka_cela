@@ -1,5 +1,5 @@
 import './style.css';
-import { connectSound } from './core/sound.js';
+import { Sound } from './core/sound.js';
 import { buildHouse } from './content/levels/house.js';
 import { HouseScript } from './content/story/house.js';
 import { Atmosphere } from './render/Atmosphere.js';
@@ -54,7 +54,7 @@ world.bus.on('levelComplete', () => {
   stage.setCamera({ target: { x: p.outside.x, z: p.outside.z + 8 }, dist: 46, pitch: 0.95, yaw: 1.57, soft: 0.5 });
 });
 
-connectSound(world, stage);
+const sound = new Sound(world, stage, script);
 
 // Управление.
 const canvas = stage.renderer.domElement;
@@ -141,6 +141,7 @@ function frame(now) {
     }
   }
   panKeys(dt);
+  if (running && !window.__g.paused) sound.update(dt * speed);
   stage.update(dt);
   stage.updateMap(dt);
   units.update(dt, acc / STEP);
@@ -184,4 +185,4 @@ function advance(seconds) {
   stage.render(world);
 }
 
-Object.assign(window.__g, { world, stage, script, units, hud, advance, paused: params.has('paused') });
+Object.assign(window.__g, { world, stage, script, units, hud, advance, sound, paused: params.has('paused') });

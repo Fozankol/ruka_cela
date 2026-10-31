@@ -147,6 +147,13 @@ export class Figure {
     this.root.visible = h.fade > 0.01 && h.state !== 'cocoon' && h.state !== 'gone';
     for (const mat of [this.mat, this.pants, this.skin, this.hair]) mat.uniforms.uFade.value = h.fade;
 
+    // Под одеялом видны только голова и плечи, иначе ноги и кисти протыкают ткань.
+    const under = lie > 0.7;
+    this.hipL.visible = !under;
+    this.hipR.visible = !under;
+    this.elbR.visible = !under;
+    this.elbL.visible = !under || !!h.danglingArm;
+
     this.root.position.set(x, lerp(0, h.bedY ?? 0, lie), z);
     this.root.rotation.order = 'YXZ';
     this.root.rotation.x = -Math.PI / 2 * lie;

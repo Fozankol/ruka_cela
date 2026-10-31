@@ -121,8 +121,8 @@ export function buildHouse() {
   soft(0.8, 0.26, 0.64, 0.42, 0.54, 0.11, C.white, 0.05);
   soft(1.58, 0.26, 0.64, 0.42, 0.54, 0.11, C.white, 0.05);
   quilt(0.72, 1.2, 1.56, 1.02, 0.575, C.blanket, [
-    { x: 1.1, z0: 1.1, z1: 2.25, h: 0.085 },
-    { x: 2.08, z0: 1.1, z1: 2.25, h: 0.095 },
+    { x: 1.1, z0: 1.1, z1: 2.25, h: 0.13 },
+    { x: 2.08, z0: 1.1, z1: 2.25, h: 0.14 },
   ]);
 
   // Тумбочки, лампа, будильник и стакан воды.
@@ -183,7 +183,7 @@ export function buildHouse() {
   soft(8.25, 0.1, 1.1, 0.08, 0, 0.74, C.darkWood, 0.02);
   soft(8.32, 0.22, 0.96, 1.96, 0.38, 0.14, C.linen, 0.05);
   soft(8.42, 0.3, 0.76, 0.4, 0.5, 0.1, C.white, 0.05);
-  quilt(8.32, 0.9, 0.96, 1.28, 0.53, C.blanketOld, [{ x: 8.8, z0: 0.92, z1: 2.15, h: 0.09 }]);
+  quilt(8.32, 0.9, 0.96, 1.28, 0.53, C.blanketOld, [{ x: 8.8, z0: 0.92, z1: 2.15, h: 0.13 }]);
   furn(10.9, 0.15, 1.4, 0.5, false);
   soft(10.9, 0.15, 1.4, 0.5, 0, 1.08, C.wood, 0.012);
   for (let shelf = 0; shelf < 3; shelf++) {
@@ -241,7 +241,7 @@ export function buildHouse() {
   legs(11.04, 7.34, 1.12, 2.12, 0.15, C.darkWood);
   soft(11.02, 7.32, 1.16, 2.16, 0.33, 0.12, C.linen, 0.05);
   soft(11.2, 7.38, 0.8, 0.38, 0.44, 0.1, C.white, 0.05);
-  quilt(11.02, 8.0, 1.16, 1.48, 0.46, C.blanketKid, [{ x: 11.6, z0: 8.0, z1: 9.3, h: 0.07 }]);
+  quilt(11.02, 8.0, 1.16, 1.48, 0.46, C.blanketKid, [{ x: 11.6, z0: 8.0, z1: 9.3, h: 0.11 }]);
   lump(11.2, 0.56, 7.8, 0.07, 0.08, 0.065, 0x8a6236);
   lump(11.2, 0.67, 7.78, 0.05, 0.05, 0.05, 0x8a6236);
   lump(11.16, 0.71, 7.78, 0.018, 0.018, 0.012, 0x8a6236);
@@ -348,7 +348,7 @@ export function buildHouse() {
       { id: 'father', name: 'Отец', x: at(2.1), z: at(2.25), bedY: 0.56, height: 1.8, room: ROOMS.bedroom, danglingArm: true, tint: 0x56688a, pants: 0x3e4a60, hair: 0x241b14 },
       { id: 'mother', name: 'Мать', x: at(1.1), z: at(2.25), bedY: 0.56, height: 1.68, room: ROOMS.bedroom, tint: 0x8a6078, pants: 0x644858, hair: 0x3a2518, longHair: true },
       { id: 'grandpa', name: 'Дед', x: at(8.8), z: at(2.1), bedY: 0.52, height: 1.7, room: ROOMS.grandpa, deepSleep: true, tint: 0xa8a498, pants: 0x4a4a42, hair: 0xa0a09c },
-      { id: 'lena', name: 'Лена', x: at(11.6), z: at(9.35), bedY: 0.44, height: 1.32, room: ROOMS.lena, tint: 0xc9a0b4, pants: 0x9a7a90, hair: 0x4a2c1a, longHair: true, skin: 0xc49a80 },
+      { id: 'lena', name: 'Лена', x: at(11.6), z: at(8.85), bedY: 0.44, height: 1.32, room: ROOMS.lena, tint: 0xc9a0b4, pants: 0x9a7a90, hair: 0x4a2c1a, longHair: true, skin: 0xc49a80 },
     ],
   };
 }

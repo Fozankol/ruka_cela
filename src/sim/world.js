@@ -431,6 +431,7 @@ export class World {
   onCocoon(h) {
     this.cocoons.push({ x: h.x, z: h.z, lie: h.lie > 0.5, h, left: 40 });
     this.level.population -= 1;
+    this.dread = (this.dread ?? 0) + 0.12;
     this.bus.emit('human', { h, event: 'cocoon' });
     this.bus.emit('population', this.level.population);
     for (const s of this.spiders) if (s.on === h) this.detach(s);
