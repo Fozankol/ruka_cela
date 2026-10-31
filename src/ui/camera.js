@@ -1,21 +1,27 @@
-// Мир трогать не нужно: мышь и клавиши только двигают камеру. Клик по полу нужен лишь во вступлении.
+import * as THREE from 'three';
+
+const DRAG = 7;
+const V = new THREE.Vector3();
+
+// Мышь: клик по вкусняшке посылает рабочего, перетаскивание двигает камеру.
 export class CameraInput {
-  constructor(world, stage) {
+  constructor(world, stage, hud) {
     this.world = world;
     this.stage = stage;
+    this.hud = hud;
     this.keys = new Set();
-    this.drag = false;
+    this.press = null;
     this.holding = false;
-    this.lx = 0;
-    this.ly = 0;
+    this.mx = 0;
+    this.my = 0;
 
     const c = stage.renderer.domElement;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('pointerdown', (e) => {
-      this.lx = e.clientX;
-      this.ly = e.clientY;
+      this.mx = e.clientX;
+      this.my = e.clientY;
       if (world.rts) {
-        this.drag = true;
+        this.press = { x: e.clientX, y: e.clientY, moved: false };
         return;
       }
       const hit = stage.pick(e.clientX, e.clientY);
@@ -25,21 +31,27 @@ export class CameraInput {
       }
     });
     window.addEventListener('pointermove', (e) => {
-      if (this.drag && stage.rig.userPan) {
-        const k = stage.rig.dist * 0.0014;
-        stage.rig.goal.x -= (e.clientX - this.lx) * k;
-        stage.rig.goal.z -= (e.clientY - this.ly) * k;
+      const p = this.press;
+      if (p) {
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > DRAG) p.moved = true;
+        if (p.moved && stage.rig.userPan) {
+          const k = stage.rig.dist * 0.0014;
+          stage.rig.goal.x -= (e.clientX - this.mx) * k;
+          stage.rig.goal.z -= (e.clientY - this.my) * k;
+        }
       }
       if (this.holding && !world.rts) {
         const hit = stage.pick(e.clientX, e.clientY);
         if (hit) world.setMark(hit.x, hit.z);
       }
-      this.lx = e.clientX;
-      this.ly = e.clientY;
+      this.mx = e.clientX;
+      this.my = e.clientY;
     });
     window.addEventListener('pointerup', () => {
-      this.drag = false;
+      const p = this.press;
+      this.press = null;
       this.holding = false;
+      if (p && !p.moved) this.click(this.mx, this.my);
     });
     c.addEventListener(
       'wheel',
@@ -47,7 +59,7 @@ export class CameraInput {
         if (!stage.rig.userPan) return;
         e.preventDefault();
         const r = stage.rig;
-        r.goalDist = Math.max(2.8, Math.min(24, r.goalDist * (1 + Math.sign(e.deltaY) * 0.12)));
+        r.goalDist = Math.max(4, Math.min(24, r.goalDist * (1 + Math.sign(e.deltaY) * 0.12)));
       },
       { passive: false },
     );
@@ -61,17 +73,52 @@ export class CameraInput {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
   }
 
+  treatAt(x, y) {
+    let best = null;
+    let bestD = 34;
+    for (const t of this.world.treats) {
+      V.set(t.x, 0.08, t.z).project(this.stage.camera);
+      const d = Math.hypot((V.x + 1) * 0.5 * innerWidth - x, (1 - V.y) * 0.5 * innerHeight - y);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  click(x, y) {
+    const w = this.world;
+    if (!w.rts) return;
+    const t = this.treatAt(x, y);
+    if (!t) return;
+    if (w.alarmOn) {
+      this.hud.notice('Сейчас тревога: все в укрытиях');
+      return;
+    }
+    if (w.dispatch(t)) {
+      w.stats.clicks++;
+      w.bus.emit('order', { x: t.x, z: t.z });
+    }
+  }
+
   update(dt) {
     const r = this.stage.rig;
-    if (!r.userPan) return;
-    const v = r.dist * 0.85 * dt;
-    const k = this.keys;
-    if (k.has('KeyW') || k.has('ArrowUp')) r.goal.z -= v;
-    if (k.has('KeyS') || k.has('ArrowDown')) r.goal.z += v;
-    if (k.has('KeyA') || k.has('ArrowLeft')) r.goal.x -= v;
-    if (k.has('KeyD') || k.has('ArrowRight')) r.goal.x += v;
-    const L = this.world.level;
-    r.goal.x = Math.max(0, Math.min(L.worldW, r.goal.x));
-    r.goal.z = Math.max(0, Math.min(L.worldD, r.goal.z));
+    if (r.userPan) {
+      const v = r.dist * 0.85 * dt;
+      const k = this.keys;
+      if (k.has('KeyW') || k.has('ArrowUp')) r.goal.z -= v;
+      if (k.has('KeyS') || k.has('ArrowDown')) r.goal.z += v;
+      if (k.has('KeyA') || k.has('ArrowLeft')) r.goal.x -= v;
+      if (k.has('KeyD') || k.has('ArrowRight')) r.goal.x += v;
+      const L = this.world.level;
+      r.goal.x = Math.max(0, Math.min(L.worldW, r.goal.x));
+      r.goal.z = Math.max(0, Math.min(L.worldD, r.goal.z));
+    }
+    const over = document.elementFromPoint(this.mx, this.my) === this.stage.renderer.domElement;
+    const t = this.world.rts && over ? this.treatAt(this.mx, this.my) : null;
+    this.hover = t;
+    document.body.classList.toggle('aiming', !!t);
+    this.hud.setTip(t && { label: `${t.name} +${t.value}` }, this.mx, this.my);
   }
 }

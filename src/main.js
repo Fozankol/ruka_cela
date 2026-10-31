@@ -25,13 +25,8 @@ const diorama = new Diorama(level, stage.scene);
 const units = new Units(world, stage);
 const atmosphere = new Atmosphere(world, stage);
 const hud = new Hud(document.getElementById('ui'), world, stage);
-const input = new CameraInput(world, stage);
-hud.handlers = {
-  train: (kind) => hud.showError(world.train(kind)),
-  upgrade: (id) => hud.showError(world.buyUpgrade(id)),
-  attack: () => script.launch(),
-  prompt: () => script.action(),
-};
+const input = new CameraInput(world, stage, hud);
+hud.handlers = { prompt: () => script.action() };
 
 const p = level.points;
 const presets = {
@@ -41,7 +36,7 @@ const presets = {
   room: { target: { x: p.crack.x - 1.3, z: p.crack.z + 2.1 }, dist: 8.2, pitch: 1.02, yaw: 1.57, soft: 1.6 },
   hall: { target: { x: p.wire.x - 0.4, z: p.wire.z - 0.2 }, dist: 9, pitch: 1.02, yaw: 1.57, soft: 1.4 },
   old: { target: { x: p.grandpa.x - 1.2, z: p.grandpa.z + 1.8 }, dist: 10, pitch: 1.02, yaw: 1.57, soft: 1.4 },
-  house: { target: { x: level.worldW / 2, z: level.worldD / 2 }, dist: 19, pitch: 1.08, yaw: 1.57, soft: 1.2 },
+  house: { target: { x: level.worldW / 2, z: level.worldD / 2 + 0.4 }, dist: 18, pitch: 1.12, yaw: 1.57, soft: 1.4 },
 };
 
 stage.setCamera({ ...presets.crawl, target: { x: p.start.x - 0.3, z: p.start.z - 0.3, y: 0.15 } }, true);
@@ -57,7 +52,7 @@ world.bus.on('shake', (v) => (stage.shake = Math.max(stage.shake, v)));
 world.bus.on('lamp', ({ id, on }) => diorama.setLamp(id, on));
 world.bus.on('blackout', () => diorama.powerOff());
 world.bus.on('levelComplete', () => {
-  world.say('Первый дом молчит. В соседнем горит свет.', { ms: 9000 });
+  world.say('Дом наш. В соседнем горит свет.', { ms: 9000 });
   stage.setCamera({ target: { x: p.outside.x, z: p.outside.z + 8 }, dist: 46, pitch: 0.95, yaw: 1.57, soft: 0.5 });
 });
 

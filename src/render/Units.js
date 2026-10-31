@@ -130,11 +130,48 @@ export class Units {
     world.bus.on('nest', (n) => this.addNest(n));
     world.bus.on('mark', (m) => this.showMark(m, false));
     world.bus.on('order', (o) => this.showMark(o, o.attack));
+    this.treatGeo = new THREE.SphereGeometry(0.075, 14, 10);
+    this.treatRing = new THREE.RingGeometry(0.2, 0.235, 32);
+    this.treatRing.rotateX(-Math.PI / 2);
+    this.treatMeshes = new Map();
+    world.bus.on('treat', (t) => this.addTreat(t));
+    world.bus.on('treatGone', (t) => this.removeTreat(t));
+    this.shelterRings = world.level.shelters.map((c) => {
+      const m = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 1.7, 0.7), ...additive, depthTest: false }));
+      m.position.set(c.x, 0.03, c.z);
+      m.scale.setScalar(1.5);
+      m.renderOrder = 6;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    });
     this.rigs = new Map();
     world.bus.on('spiderDead', (s) => {
       this.rigs.get(s)?.dispose();
       this.rigs.delete(s);
     });
+  }
+
+  addTreat(t) {
+    const g = new THREE.Group();
+    g.position.set(t.x, 0, t.z);
+    const ball = new THREE.Mesh(this.treatGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(...t.color) }));
+    ball.position.y = 0.1;
+    const ring = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(...t.color), ...additive, depthTest: false, opacity: 0.8 }));
+    ring.position.y = 0.03;
+    ring.renderOrder = 6;
+    g.add(ball, ring);
+    this.group.add(g);
+    this.treatMeshes.set(t, { g, ball, ring, born: performance.now() });
+  }
+
+  removeTreat(t) {
+    const m = this.treatMeshes.get(t);
+    if (!m) return;
+    this.group.remove(m.g);
+    m.ball.material.dispose();
+    m.ring.material.dispose();
+    this.treatMeshes.delete(t);
   }
 
   showMark(m, attack) {
@@ -267,10 +304,23 @@ export class Units {
     fp.needsUpdate = true;
 
     for (const { m, nest } of this.nestMeshes) {
-      const k = 0.7 + (w.levels.room ?? 0) * 0.16;
+      const k = 0.7 + (w.food / 100) * 0.7;
       const beat = nest.queue.length ? 1 + Math.sin(performance.now() * 0.006) * 0.05 : 1;
       m.scale.set(0.2 * k * beat, 0.11 * k * beat, 0.16 * k * beat);
     }
+
+    const now = performance.now();
+    for (const [t, m] of this.treatMeshes) {
+      const grow = Math.min(1, (now - m.born) / 300);
+      const busy = t.worker || t.queued;
+      m.ball.position.y = 0.1 + Math.sin(now * 0.004 + t.x) * 0.025;
+      m.g.scale.setScalar(grow);
+      m.ring.scale.setScalar(busy ? 0.75 : 1 + Math.sin(now * 0.005 + t.z) * 0.1);
+      if (busy) m.ring.material.color.setRGB(0.3, 1.8, 0.7);
+      else m.ring.material.color.setRGB(...t.color);
+      m.ring.visible = !w.alarmOn;
+    }
+    for (const r of this.shelterRings) r.visible = w.alarmOn;
 
     for (const f of this.figures) f.update(dt, alpha);
   }

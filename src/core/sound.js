@@ -31,6 +31,8 @@ export class Sound {
     bus.on('radio', () => audio.play('radioBlip'));
     bus.on('flyEaten', (f) => audio.play('bite', { pan: this.pan(f.x), volume: 0.25 * this.near(f.x, f.z) }));
     bus.on('levelComplete', () => audio.play('windowOpen'));
+    bus.on('alarm', () => audio.play('alarm'));
+    bus.on('order', () => audio.play('uiClick'));
   }
 
   pan(x) {
@@ -87,7 +89,7 @@ export class Sound {
 
     // В погоне слышно собственное сердце.
     t.heart -= dt;
-    if (script.step === 'flee' && t.heart <= 0) {
+    if ((script.step === 'flee' || w.alarmOn) && t.heart <= 0) {
       t.heart = 0.62;
       audio.play('heartbeat', { volume: 0.9 });
     }
@@ -99,7 +101,7 @@ export class Sound {
     for (const f of w.flies) flyLevel = Math.max(flyLevel, this.near(f.x, f.z));
     audio.setFlies(w.flies.length ? flyLevel * Math.min(1, w.flies.length / 5) : 0);
 
-    audio.setDread(Math.min(1, w.dread ?? 0));
+    audio.setDread(Math.min(1, (w.alert ?? 0) / 110));
   }
 
   nearestSleeper() {
