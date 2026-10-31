@@ -122,6 +122,11 @@ export class World {
       hidden: false,
       moveSeed: this.rng.next(),
     };
+    if (!this.grid.spiderOk(this.grid.at(x, z))) {
+      this.grid.snapSpider(s);
+      s.px = s.x;
+      s.pz = s.z;
+    }
     this.spiders.push(s);
     if (kind === 'hero') this.hero = s;
     return s;
@@ -187,7 +192,11 @@ export class World {
   }
 
   moveAlongField(s, speed, dt) {
-    if (!this.markField || !this.grid.nextStep(this.markField, s.x, s.z, STEP)) return false;
+    if (!this.markField) return false;
+    if (!this.grid.nextStep(this.markField, s.x, s.z, STEP)) {
+      if (!this.grid.spiderOk(this.grid.at(s.x, s.z))) this.grid.snapSpider(s);
+      return false;
+    }
     return this.steer(s, STEP.x, STEP.z, speed, dt);
   }
 

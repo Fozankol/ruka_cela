@@ -124,6 +124,15 @@ export class Grid {
     return -1;
   }
 
+  // Возвращает застрявшего в стене паука на ближайшую проходимую клетку.
+  snapSpider(o) {
+    const i = this.nearestOk(o.x, o.z, SPIDER_OK);
+    if (i < 0) return;
+    const cx = i % this.w;
+    o.x = this.wx(cx);
+    o.z = this.wz((i - cx) / this.w);
+  }
+
   // Следующая точка пути по полю расстояний, без срезания углов через стены.
   nextStep(field, wx, wz, out) {
     const cx = this.cx(wx);
