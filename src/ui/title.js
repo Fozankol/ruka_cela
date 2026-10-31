@@ -12,7 +12,7 @@ function writePref(v) {
   try { localStorage.setItem(STORE_KEY, v ? '1' : '0'); } catch { /* приватный режим: просто не запоминаем */ }
 }
 
-export function showTitle({ onStart, ready, parent = document.body } = {}) {
+export function showTitle({ onStart, onWar, onStage, onFinale, stages = [], onResume, resumeLabel, ready, parent = document.body } = {}) {
   const root = document.createElement('section');
   root.className = 'title-screen';
   root.setAttribute('role', 'dialog');
@@ -23,7 +23,10 @@ export function showTitle({ onStart, ready, parent = document.body } = {}) {
     <div class="title-inner">
       <h1 class="title-name" id="title-name">РУКА ЦЕЛА</h1>
       <p class="title-sub">Паук против человека</p>
-      <button class="title-start" type="button">Начать</button>
+      <button class="title-start" type="button">С самого начала</button>
+      <button class="title-start title-war" type="button">Сразу к захвату мира</button>
+      <p class="title-note">С начала: паук под кроватью, дом, улица, село, город и война. Захват мира: сразу карта планеты, легионы, наука и союзы.</p>
+      <div class="title-stages"></div>
       <label class="title-options">
         <input type="checkbox" role="switch" class="title-flicker" />
         <span>Меньше мерцания</span>
@@ -39,6 +42,48 @@ export function showTitle({ onStart, ready, parent = document.body } = {}) {
     root.classList.toggle('less-flicker', flicker.checked);
     writePref(flicker.checked);
   });
+
+  // Быстрые входы: война сразу или любой этап.
+  const warBtn = root.querySelector('.title-war');
+  warBtn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    close();
+    onWar?.({ lessFlicker: flicker.checked });
+  });
+  const stageRow = root.querySelector('.title-stages');
+  for (const s of stages) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = s.label;
+    b.addEventListener('click', () => {
+      close();
+      onStage?.(s.id, { lessFlicker: flicker.checked });
+    });
+    stageRow.append(b);
+  }
+  if (onFinale) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Финал';
+    b.addEventListener('click', () => {
+      close();
+      onFinale();
+    });
+    stageRow.append(b);
+  }
+
+  // Сохранённая партия: кнопка появляется только когда есть что продолжить.
+  if (resumeLabel) {
+    const again = document.createElement('button');
+    again.className = 'title-start';
+    again.type = 'button';
+    again.textContent = resumeLabel;
+    btn.before(again);
+    again.addEventListener('click', () => {
+      close();
+      onResume?.({ lessFlicker: flicker.checked });
+    });
+  }
 
   let closed = false;
   function close() {
@@ -67,7 +112,7 @@ export function showTitle({ onStart, ready, parent = document.body } = {}) {
     btn.textContent = 'Загрузка…';
     btn.setAttribute('aria-busy', 'true');
     ready.then(
-      () => { btn.disabled = false; btn.textContent = 'Начать'; btn.removeAttribute('aria-busy'); if (!closed) btn.focus(); },
+      () => { btn.disabled = false; btn.textContent = 'С самого начала'; btn.removeAttribute('aria-busy'); if (!closed) btn.focus(); },
       () => { btn.textContent = 'Не загрузилось. Обнови страницу'; btn.removeAttribute('aria-busy'); },
     );
   }

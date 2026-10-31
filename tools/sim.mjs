@@ -1,38 +1,45 @@
 // Баланс войны без браузера: npm run sim
+import { CITY_MAP } from '../src/content/war/city.js';
 import { War } from '../src/sim/war.js';
 
-function run(label, player, seed) {
-  const war = new War({ seed });
+function line(war, extra = '') {
+  const n = war.regions.filter((r) => r.owner === 'swarm').length;
+  const leg = war.legions();
+  const foes = war.units.length - leg.length;
+  return `${Math.round(war.day / 60)}м р${n}/${war.regions.length} л${leg.length}/${war.cap} вр${foes} био${Math.round(war.biomass)} +${Math.round(war.lastIncome)} вл${Math.round(war.influencePts)} Т${Math.round(war.tension)} Р${Math.round(war.dawn)} нау${Object.keys(war.done).length} фок${Object.keys(war.focusDone).length} ${extra}`;
+}
+
+function run(label, every, seed, map) {
+  const war = new War({ seed, ...(map ? { map } : {}) });
   const log = [];
-  const count = () => war.regions.filter((r) => r.owner === 'swarm').length;
   let lost = 0;
-  let nukes = 0;
+  let dead = 0;
+  let surr = 0;
   war.bus.on('warLost', () => lost++);
-  war.bus.on('warNuke', () => nukes++);
+  war.bus.on('warToast', (t) => { if (t.includes('уничтожен')) dead++; });
+  war.bus.on('warSurrender', () => surr++);
   const dt = 0.25;
-  const limit = 4 * 3600;
-  let next = 1;
+  const limit = (map ? 1 : 5) * 3600;
+  let next = 0;
+  let acc = 0;
   while (!war.finished && war.day < limit) {
-    player(war);
+    acc += dt;
+    if (acc >= every) {
+      acc = 0;
+      war.autoplay();
+    }
     war.tick(dt);
-    const n = count();
-    while (n >= next) {
-      if (next % 8 === 0 || next === 1) log.push(`${next}р ${Math.round(war.day / 60)}м А${Math.round(war.armies)}/${war.cap} ${Math.round(war.lastIncome)}/с Т${Math.round(war.tension)}`);
-      next += 1;
+    if (war.day >= next) {
+      next += map ? 60 : 600;
+      log.push(line(war));
     }
   }
-  const stage = war.stage;
-  console.log(`${label} seed ${seed}: ${war.finished ? 'конец' : 'не дошёл'} за ${Math.round(war.day / 60)} мин, регионов ${count()}/${war.regions.length}, стадия ${stage}, потери регионов ${lost}, удары ${nukes}, рассвет ${Math.round(war.dawn)}`);
-  console.log('  ' + log.join(' | '));
+  console.log(`${label} seed ${seed}: ${war.finished ? 'конец' : 'не дошёл'} за ${(war.day / 60).toFixed(1)} мин. потери регионов ${lost}, легионов ${dead}, сдались ${surr}`);
+  for (const l of log) console.log('  ' + l);
   return war;
 }
 
-for (const seed of [7, 21, 42]) run('бот', (w) => w.autoplay(), seed);
-
-// Ленивый игрок ничего не покупает, только держит один фронт.
-run('ленивый', (w) => {
-  if (!w.fronts.length) {
-    const t = w.regions.find((r) => w.border(r));
-    if (t) w.toggleFront(t.id);
-  }
-}, 7);
+const arg = process.argv[2];
+if (!arg || arg === 'world') run('бот', 1, 7);
+if (arg === 'lazy') run('рассеянный', 12, 7);
+if (!arg || arg === 'city') run('город', 1, 7, CITY_MAP);

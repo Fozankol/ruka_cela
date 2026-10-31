@@ -423,7 +423,7 @@ export class Stage {
     const u = this.dof.uniforms;
     u.uFocus.value = r.dist;
     u.uRange.value = Math.max(0.5, r.dist * 0.75);
-    u.uMax.value = !war && this.quality < 2 ? clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016) : 0;
+    u.uMax.value = !war && this.quality < 2 && r.dist < 30 ? clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016) : 0;
   }
 
   render(world) {

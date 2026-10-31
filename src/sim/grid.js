@@ -118,6 +118,42 @@ export class Grid {
     return field;
   }
 
+  // Поле с ценой клетки: по паутине идти дешевле, поэтому рой сам выбирает нити.
+  flowWeb(wx, wz, offCost = 3) {
+    const { w, h, type, web } = this;
+    const field = new Int32Array(this.n).fill(-1);
+    const start = this.nearestOk(wx, wz, SPIDER_OK);
+    if (start < 0) return field;
+    const size = offCost + 1;
+    const buckets = Array.from({ length: size }, () => []);
+    field[start] = 0;
+    buckets[0].push(start);
+    let left = 1;
+    for (let d = 0; left > 0; d++) {
+      const b = buckets[d % size];
+      while (b.length) {
+        const i = b.pop();
+        left--;
+        if (field[i] !== d) continue;
+        const cx = i % w;
+        const cz = (i - cx) / w;
+        for (let k = 0; k < 4; k++) {
+          const nx = cx + N4[k][0];
+          const nz = cz + N4[k][1];
+          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
+          const ni = nz * w + nx;
+          if (!SPIDER_OK[type[ni]]) continue;
+          const nd = d + (web[ni] > 0.3 ? 1 : offCost);
+          if (field[ni] >= 0 && field[ni] <= nd) continue;
+          field[ni] = nd;
+          buckets[nd % size].push(ni);
+          left++;
+        }
+      }
+    }
+    return field;
+  }
+
   nearestOk(wx, wz, ok) {
     const cx = this.cx(wx);
     const cz = this.cz(wz);
@@ -134,6 +170,29 @@ export class Grid {
       }
     }
     return -1;
+  }
+
+  // Карман, из которого поле не ведёт к цели: выводим на ближайшую клетку пути.
+  snapToField(o, field) {
+    const cx = this.cx(o.x);
+    const cz = this.cz(o.z);
+    for (let r = 1; r < 48; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r || !this.inb(cx + dx, cz + dz)) continue;
+          if (field[this.idx(cx + dx, cz + dz)] < 0) continue;
+          o.x = this.wx(cx + dx);
+          o.z = this.wz(cz + dz);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Можно ли пауку пройти по прямой.
+  spiderLine(x0, z0, x1, z1) {
+    return this.clearLine(x0, z0, x1, z1, SPIDER_OK);
   }
 
   // То же для человека: случайно зашедшего на мебель возвращаем на пол.

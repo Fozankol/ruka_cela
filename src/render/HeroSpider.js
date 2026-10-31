@@ -86,6 +86,8 @@ const LOOKS = {
   hero: { base: 0x050505, spots: 10, fang: 1 },
   fighter: { base: 0x060505, spots: 5, fang: 1.5 },
   carrier: { base: 0x6b4a22, spots: 0, fang: 0.6 },
+  gnawer: { base: 0x2a1c30, spots: 3, fang: 2.2 },
+  widow: { base: 0x040404, spots: 12, fang: 1.8 },
 };
 
 const LEGS = [

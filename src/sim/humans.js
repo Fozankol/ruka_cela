@@ -78,19 +78,31 @@ export function dropTorch(world, h) {
 function step(world, h, dt) {
   h.moving = true;
   // Ошибка пути не значит «дошёл»: возвращаем человека на пол, и он идёт дальше.
-  if (!world.grid.smoothStep(h.field, h.x, h.z, 'human', STEP)) {
-    world.grid.snapHuman(h);
+  const g = world.grid;
+  if (!g.smoothStep(h.field, h.x, h.z, 'human', STEP)) {
+    g.snapHuman(h);
+    // Человек попал в карман между мебелью: выводим его на дорогу, иначе он стоит вечно.
+    if (h.field[g.at(h.x, h.z)] < 0 && !g.snapToField(h, h.field)) return true;
     return false;
   }
   const dx = STEP.x - h.x;
   const dz = STEP.z - h.z;
   const d = Math.hypot(dx, dz);
-  const web = world.grid.web[world.grid.at(h.x, h.z)];
+  const web = g.web[g.at(h.x, h.z)];
   const speed = h.speed * (1 - web * 0.55);
   if (d > 1e-4) {
     const v = Math.min(speed * dt, d);
-    h.x += (dx / d) * v;
-    h.z += (dz / d) * v;
+    const nx = h.x + (dx / d) * v;
+    const nz = h.z + (dz / d) * v;
+    // Косяк двери не пускает внутрь стены: человек скользит вдоль него.
+    if (g.humanOk(g.at(nx, nz))) {
+      h.x = nx;
+      h.z = nz;
+    } else if (g.humanOk(g.at(nx, h.z))) {
+      h.x = nx;
+    } else if (g.humanOk(g.at(h.x, nz))) {
+      h.z = nz;
+    }
     h.dir = angleLerp(h.dir, Math.atan2(dz, dx), Math.min(1, dt * 7));
   }
   h.stepT -= dt;
@@ -98,19 +110,22 @@ function step(world, h, dt) {
     h.stepT = 0.42;
     world.bus.emit('ripple', { x: h.x, z: h.z, power: 0.8, kind: 'step' });
   }
-  return dist(h.x, h.z, h.goalX, h.goalZ) < 0.28;
+  // Цель бывает под мебелью: тогда путь кончается на ближайшей свободной клетке.
+  return dist(h.x, h.z, h.goalX, h.goalZ) < 0.28 || h.field[g.at(h.x, h.z)] === 0;
 }
 
 function nearestVisibleSpider(world, h, range) {
   let best = null;
   let bestD = range;
   for (const s of world.spiders) {
-    if (s.hidden || s.on) continue;
+    if (s.hidden || s.on || s.perched) continue;
     const d = dist(h.x, h.z, s.x, s.z);
     if (d >= bestD) continue;
     // Затаившегося паука замечают только вплотную.
     if (s.order?.type === 'hide' && d > 0.55) continue;
     if (world.grid.litAt(s.x, s.z) < 0.28) continue;
+    // Паук на своей нити сливается с паутиной.
+    if (world.rules.webRoutes && world.onWeb(s.x, s.z)) continue;
     best = s;
     bestD = d;
   }

@@ -150,3 +150,9 @@
   .title-thread { height: 34vh; }
   .title-screen { transition: none; }
 }
+
+.title-war { margin-top: -6px; border-color: rgba(200, 40, 40, 0.75); }
+.title-note { max-width: 44ch; margin: 0; font-size: 13px; line-height: 1.4; color: #a49e97; text-align: center; }
+.title-stages { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; }
+.title-stages button { padding: 2px 4px; font: inherit; font-size: 13px; color: #8d8780; background: none; border: 0; border-bottom: 1px solid transparent; cursor: pointer; }
+.title-stages button:hover, .title-stages button:focus-visible { color: #e8e2da; border-bottom-color: #b33; outline: none; }

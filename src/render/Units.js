@@ -131,6 +131,13 @@ export class Units {
     bus.on('slipper', (e) => this.onSlipper(e));
     bus.on('human', (e) => e.event === 'cocoon' && this.addCocoon(e.h));
     bus.on('nest', (n) => this.addNest(n));
+    bus.on('nestGone', (n) => {
+      const e = this.nestMeshes.find((x) => x.nest === n);
+      if (!e) return;
+      this.group.remove(e.m);
+      this.nestMeshes = this.nestMeshes.filter((x) => x !== e);
+    });
+    this.slipper.scale.setScalar(world.unitK);
     bus.on('mark', (m) => this.showMark(m, false));
     bus.on('order', (o) => this.showMark(o, o.attack));
     this.treatGeo = new THREE.SphereGeometry(0.075, 14, 10);
@@ -156,11 +163,80 @@ export class Units {
       this.group.add(m);
       return m;
     });
+    this.targetRings = Array.from({ length: 22 }, () => {
+      const m = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.2, 0.5), ...additive, depthTest: false }));
+      m.position.y = 0.04;
+      m.renderOrder = 7;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    });
+    const circle = new THREE.RingGeometry(0.965, 1, 72);
+    circle.rotateX(-Math.PI / 2);
+    this.circleRings = Array.from({ length: 6 }, () => {
+      const m = new THREE.Mesh(circle, new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), ...additive, depthTest: false }));
+      m.position.y = 0.05;
+      m.renderOrder = 7;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    });
+    const cloudGeo = new THREE.CircleGeometry(1, 32);
+    cloudGeo.rotateX(-Math.PI / 2);
+    this.cloudDiscs = Array.from({ length: 3 }, () => {
+      const m = new THREE.Mesh(
+        cloudGeo,
+        new THREE.ShaderMaterial({
+          ...additive,
+          depthTest: false,
+          uniforms: { uT: { value: 0 } },
+          vertexShader: 'varying vec2 vP; void main(){ vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+          fragmentShader: 'uniform float uT; varying vec2 vP; void main(){ float d = length(vP); float n = .75 + .25 * sin(vP.x * 9. + uT * 2.) * sin(vP.y * 8. - uT * 1.6); float a = (1. - smoothstep(.2, 1., d)) * n; gl_FragColor = vec4(vec3(.45, 1.5, .4) * a * .55, 1.); }',
+        }),
+      );
+      m.position.y = 0.06;
+      m.renderOrder = 6;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    });
+    this.dogMat = worldMaterial({ color: 0x7a5c44 });
+    this.dogs = new Map();
     this.rigs = new Map();
     bus.on('spiderDead', (s) => {
       this.rigs.get(s)?.dispose();
       this.rigs.delete(s);
     });
+  }
+
+  addDog(d) {
+    const k = this.world.unitK * 0.55;
+    const root = new THREE.Group();
+    const part = (w, h, l, x, y) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w * k, h * k, l * k), this.dogMat);
+      m.position.set(x * k, y * k, 0);
+      m.layers.enable(CAST_LAYER);
+      root.add(m);
+      return m;
+    };
+    part(1, 0.42, 0.34, 0, 0.62);
+    part(0.34, 0.34, 0.3, 0.6, 0.86);
+    part(0.3, 0.14, 0.2, 0.84, 0.8);
+    part(0.42, 0.08, 0.08, -0.66, 0.84);
+    const legs = [
+      [0.36, 0.12],
+      [0.36, -0.12],
+      [-0.36, 0.12],
+      [-0.36, -0.12],
+    ].map(([x, z]) => {
+      const m = part(0.11, 0.46, 0.11, x, 0.23);
+      m.position.z = z * k;
+      return m;
+    });
+    this.group.add(root);
+    const e = { root, legs };
+    this.dogs.set(d, e);
+    return e;
   }
 
   addTreat(t) {
@@ -218,8 +294,9 @@ export class Units {
       m.position.set(h.x, (h.bedY ?? 0.4) + 0.14, h.z - h.height * 0.46);
       m.scale.set(0.27, 0.24, h.height * 0.52);
     } else {
+      const w = (0.27 * h.height) / 1.8;
       m.position.set(h.x, h.height * 0.46, h.z);
-      m.scale.set(0.27, h.height * 0.52, 0.27);
+      m.scale.set(w, h.height * 0.52, w);
     }
     this.group.add(m);
     this.cocoonMeshes.push(m);
@@ -291,7 +368,7 @@ export class Units {
       this.slipper.rotation.y = fx.rot;
       if (!fx.hit) {
         const k = Math.min(1, fx.t / fx.life);
-        this.shadow.scale.setScalar(1.7 - k * 0.7);
+        this.shadow.scale.setScalar((1.7 - k * 0.7) * w.unitK);
         this.shadow.material.uniforms.uA.value = k;
         const e = k * k * k * k;
         this.slipper.position.y = lerp(1.9, 0.02, e);
@@ -316,7 +393,7 @@ export class Units {
     fp.needsUpdate = true;
 
     for (const { m, nest } of this.nestMeshes) {
-      const k = 0.7 + (w.food / 100) * 0.7;
+      const k = (0.7 + (Math.min(w.food, 100) / 100) * 0.7) * w.unitK;
       const beat = nest.queue.length ? 1 + Math.sin(performance.now() * 0.006) * 0.05 : 1;
       m.scale.set(0.2 * k * beat, 0.11 * k * beat, 0.16 * k * beat);
     }
@@ -330,7 +407,49 @@ export class Units {
       m.ring.scale.setScalar(busy ? 0.75 : 1 + Math.sin(now * 0.005 + t.z) * 0.1);
       if (busy) m.ring.material.color.setRGB(0.3, 1.8, 0.7);
       else m.ring.material.color.setRGB(...t.color);
-      m.ring.visible = !w.alarmOn;
+      m.ring.visible = !w.alarmOn && !t.locked;
+      if (t.locked) m.ball.material.color.setRGB(0.05, 0.05, 0.07);
+      else m.ball.material.color.setRGB(...t.color);
+    }
+
+    const targets = w.script?.targets?.() ?? [];
+    this.targetRings.forEach((r, i) => {
+      const t = targets[i];
+      r.visible = !!t;
+      if (!t) return;
+      r.position.x = t.x;
+      r.position.z = t.z;
+      r.material.color.setRGB(...(t.small ? [3.6, 0.9, 0.5] : t.hot ? [4, 0.3, 0.2] : t.busy ? [0.3, 1.8, 0.7] : [3, 2.2, 0.5]));
+      r.scale.setScalar((t.small ? 0.9 : t.hot ? 3.4 : 1.7 + Math.sin(now * 0.005 + i) * 0.2) * w.unitK);
+    });
+    const circles = w.script?.circles?.() ?? [];
+    this.circleRings.forEach((r, i) => {
+      const c = circles[i];
+      r.visible = !!c;
+      if (!c) return;
+      r.position.x = c.x;
+      r.position.z = c.z;
+      r.scale.setScalar(c.r);
+      r.material.color.setRGB(...(c.hot ? [2.4, 0.25, 0.16] : [0.5, 0.5, 0.4]));
+    });
+    const clouds = w.script?.clouds?.() ?? [];
+    this.cloudDiscs.forEach((m, i) => {
+      const c = clouds[i];
+      m.visible = !!c;
+      if (!c) return;
+      m.position.x = c.x;
+      m.position.z = c.z;
+      m.scale.setScalar(c.r);
+      m.material.uniforms.uT.value = now * 0.001;
+    });
+    for (const d of w.dogs) {
+      const e = this.dogs.get(d) ?? this.addDog(d);
+      e.root.visible = !d.down;
+      e.root.position.set(d.x, 0, d.z);
+      e.root.rotation.y = -d.dir;
+      e.legs.forEach((m, i) => {
+        m.rotation.z = d.moving ? Math.sin(now * 0.016 + i * 2.1) * 0.5 : 0;
+      });
     }
     for (const r of this.shelterRings) r.visible = w.alarmOn;
     const marks = w.alarmOn ? w.exposedMarks() : [];

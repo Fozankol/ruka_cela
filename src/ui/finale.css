@@ -1,0 +1,41 @@
+.finale-screen {
+  position: fixed; inset: 0; z-index: 2147483000; overflow: auto;
+  display: grid; place-items: center; isolation: isolate;
+  background: #030405; color: #e8e7e1; color-scheme: dark;
+  font: 16px/1.6 'Courier New', monospace; text-align: center;
+  overscroll-behavior: contain; touch-action: none;
+}
+.finale-screen *, .finale-screen *::before { box-sizing: border-box; }
+.finale-screen.finale-hide-cursor, .finale-hide-cursor * { cursor: none !important; }
+.finale-screen:focus { outline: none; }
+.finale-web { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+.finale-content { position: relative; z-index: 1; width: min(850px, 100%); padding: 70px 28px; }
+.finale-screen h1 { font-size: clamp(26px, 4.4vw, 52px); line-height: 1.35; font-weight: 400; letter-spacing: -.035em; margin: 0 0 28px; text-wrap: balance; }
+.finale-eyebrow { font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: #939b9d; margin: 0 0 32px; }
+.finale-stat { color: #aaaead; font-size: clamp(15px, 2.3vw, 21px); }
+.finale-clock { margin-top: 50px; font-size: clamp(16px, 2.4vw, 24px); }
+.finale-caption { position: fixed; bottom: 24px; left: 0; width: 100%; font-size: 10px; letter-spacing: .32em; color: #777f82; pointer-events: none; }
+.finale-screen blockquote { margin: 25px 0; font-size: clamp(24px, 4vw, 42px); line-height: 1.5; }
+.finale-hint { color: #92999b; font-size: 13px; }
+.finale-screen button { border: 1px solid #5e6568; border-radius: 0; background: #0c0f10; color: #d1d5d3; padding: 13px 22px; font: inherit; font-size: 14px; margin-top: 24px; touch-action: manipulation; }
+.finale-screen button:hover { border-color: #c3cbc8; background: #171c1d; }
+.finale-screen button:focus-visible { outline: 2px solid #ecece6; outline-offset: 6px; }
+.finale-screen .finale-command { letter-spacing: .12em; font-size: clamp(29px, 6vw, 66px); }
+.finale-timer { font-size: 74px; font-variant-numeric: tabular-nums; line-height: 1.2; transform: scale(calc(1 + .7 * var(--dread, 0))); color: color-mix(in srgb, #d8342a calc(var(--dread, 0) * 100%), #e8e7e1); }
+.finale-screen[data-phase='countdown']::after { content: ''; position: fixed; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(ellipse at center, transparent calc(62% - 44% * var(--dread, 0)), rgba(0, 0, 0, .96) calc(104% - 34% * var(--dread, 0))); }
+.finale-screen .finale-temptation { color: #ada69b; border-color: #4e4741; margin-top: 42px; }
+.finale-radio { display: flex; justify-content: center; align-items: center; gap: 6px; height: 36px; opacity: .5; }
+.finale-radio i { width: 2px; height: 25%; background: #9ba5a5; animation: finale-signal 2.7s ease-in-out infinite alternate; }
+.finale-radio i:nth-child(3n) { animation-delay: -.8s; height: 90%; }
+.finale-radio i:nth-child(2n) { animation-delay: -1.7s; height: 60%; }
+@keyframes finale-signal { to { transform: scaleY(.2); opacity: .35; } }
+.finale-screen[data-phase='lost'], .finale-screen[data-phase='silence'], .finale-screen[data-phase='won'], .finale-screen[data-phase='outro'], .finale-screen[data-phase='end'] { background: #000; }
+.finale-screen[data-phase='silence'] .finale-web { visibility: hidden; }
+.finale-screen .finale-won { color: #fff; letter-spacing: .18em; animation: finale-arrive 3s ease-out both; }
+@keyframes finale-arrive { from { opacity: 0; } to { opacity: 1; } }
+.finale-screen[data-phase='outro'] .finale-won { animation: finale-leave 1.2s ease-in both; }
+@keyframes finale-leave { from { opacity: 1; } to { opacity: 0; } }
+.finale-reduced *, .finale-reduced *::before { animation: none !important; }
+.finale-reduced .finale-timer { transform: none; }
+@media (prefers-reduced-motion: reduce) { .finale-screen * { animation: none !important; } }
+@media (max-width: 480px) { .finale-content { padding: 55px 20px; } .finale-eyebrow { letter-spacing: .12em; } .finale-caption { font-size: 9px; } }

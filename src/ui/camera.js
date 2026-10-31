@@ -21,7 +21,8 @@ export class CameraInput {
       this.mx = e.clientX;
       this.my = e.clientY;
       if (this.world.rts) {
-        this.press = { x: e.clientX, y: e.clientY, moved: false };
+        this.press = { x: e.clientX, y: e.clientY, moved: false, pan: e.button === 2 || !this.world.script?.paints };
+        this.lastPaint = stage.pick(e.clientX, e.clientY);
         return;
       }
       const hit = stage.pick(e.clientX, e.clientY);
@@ -34,11 +35,12 @@ export class CameraInput {
       const p = this.press;
       if (p) {
         if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > DRAG) p.moved = true;
-        if (p.moved && stage.rig.userPan) {
+        if (p.moved && p.pan && stage.rig.userPan) {
           const k = stage.rig.dist * 0.0014;
           stage.rig.goal.x -= (e.clientX - this.mx) * k;
           stage.rig.goal.z -= (e.clientY - this.my) * k;
         }
+        if (p.moved && !p.pan) this.paint(e.clientX, e.clientY);
       }
       if (this.holding && !this.world.rts) {
         const hit = stage.pick(e.clientX, e.clientY);
@@ -75,6 +77,18 @@ export class CameraInput {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
   }
 
+  // Тянем нить по следу мыши: шаг меньше кисти, чтобы линия была сплошной.
+  paint(x, y) {
+    const s = this.world.script;
+    const hit = this.stage.pick(x, y);
+    if (!hit) return;
+    const from = this.lastPaint ?? hit;
+    const stepLen = this.world.rules.brush * this.world.unitK * 0.5;
+    const n = Math.max(1, Math.ceil(Math.hypot(hit.x - from.x, hit.z - from.z) / stepLen));
+    for (let i = 1; i <= n; i++) s.paintAt(from.x + ((hit.x - from.x) * i) / n, from.z + ((hit.z - from.z) * i) / n);
+    this.lastPaint = hit;
+  }
+
   treatAt(x, y) {
     let best = null;
     let bestD = 34;
@@ -104,12 +118,37 @@ export class CameraInput {
     return best;
   }
 
+  // Цели этапа: столбы, набат.
+  targetAt(x, y) {
+    let best = null;
+    let bestD = 42;
+    for (const t of this.world.script?.targets?.() ?? []) {
+      V.set(t.x, 0.08, t.z).project(this.stage.camera);
+      const d = Math.hypot((V.x + 1) * 0.5 * innerWidth - x, (1 - V.y) * 0.5 * innerHeight - y);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
   click(x, y) {
     const w = this.world;
     if (!w.rts) return;
+    if (w.script?.placing) {
+      const hit = this.stage.pick(x, y);
+      if (hit) w.script.place(hit.x, hit.z);
+      return;
+    }
     if (w.alarmOn) {
       const m = this.markAt(x, y);
       if (m) w.recall(m.s);
+      return;
+    }
+    const goal = this.targetAt(x, y);
+    if (goal) {
+      goal.run();
       return;
     }
     const t = this.treatAt(x, y);
@@ -121,10 +160,7 @@ export class CameraInput {
   }
 
   update(dt) {
-    if (this.stage.warMode) {
-      this.hud.setTip(null);
-      return;
-    }
+    if (this.stage.warMode) return;
     const r = this.stage.rig;
     if (r.userPan) {
       const v = r.dist * 0.85 * dt;
@@ -140,8 +176,12 @@ export class CameraInput {
     const over = document.elementFromPoint(this.mx, this.my) === this.stage.renderer.domElement;
     const alarm = this.world.alarmOn;
     const m = this.world.rts && over && alarm ? this.markAt(this.mx, this.my) : null;
-    const t = this.world.rts && over && !alarm ? this.treatAt(this.mx, this.my) : null;
-    document.body.classList.toggle('aiming', !!(t || m));
-    this.hud.setTip(m ? { label: 'Снять рабочего' } : t && { label: `${t.name} +${t.value}` }, this.mx, this.my);
+    const goal = this.world.rts && over && !alarm ? this.targetAt(this.mx, this.my) : null;
+    const t = this.world.rts && over && !alarm && !goal ? this.treatAt(this.mx, this.my) : null;
+    const placing = this.world.script?.placing;
+    document.body.classList.toggle('aiming', !!(t || m || goal || placing));
+    const note = this.press?.moved && !this.press.pan ? this.world.script?.paintNote : '';
+    const tip = note || (m ? 'Снять рабочего' : goal ? goal.label : t ? (t.locked ? 'Заперто светом' : `${t.name} +${t.value}`) : null);
+    this.hud.setTip(tip && { label: tip }, this.mx, this.my);
   }
 }

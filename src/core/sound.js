@@ -1,4 +1,6 @@
 import { GameAudio } from '../audio/GameAudio.js';
+import { Music } from '../audio/Music.js';
+import { loud, readVolume, writeVolume } from './volume.js';
 
 // Связывает события мира со звуком и ведёт постоянные слои: дыхание, часы, лапки, сердце.
 export class Sound {
@@ -9,9 +11,17 @@ export class Sound {
     this.audio = new GameAudio();
     this.t = { scuttle: 0, swarm: 0, breath: 1.5, tick: 1, cricket: 2, heart: 0 };
     this.breathIn = true;
-    const unlock = () => this.audio.unlock();
+    this.music = new Music();
+    this.volume = readVolume();
+    this.applyVolume();
+    const unlock = () => {
+      this.audio.unlock();
+      if (this.audio.ctx && !this.music.ctx) this.music.attach(this.audio.ctx, this.audio.master);
+    };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+    // Таймер не зависит от кадров: скрытая вкладка не обрывает музыку.
+    setInterval(() => this.music.schedule(document.hidden ? 1.6 : 0.4), 120);
 
     const { audio } = this;
     const bus = world.bus;
@@ -30,13 +40,65 @@ export class Sound {
     });
     bus.on('radio', () => audio.play('radioBlip'));
     bus.on('flyEaten', (f) => audio.play('bite', { pan: this.pan(f.x), volume: 0.25 * this.near(f.x, f.z) }));
-    bus.on('levelComplete', () => audio.play('windowOpen'));
+    bus.on('levelComplete', () => {
+      audio.play('windowOpen');
+      this.music.hit('win');
+    });
     bus.on('alarm', () => audio.play('alarm'));
-    bus.on('warCapture', () => audio.play('cocoon'));
+    bus.on('warCapture', () => {
+      audio.play('cocoon');
+      this.music.hit('capture');
+    });
     bus.on('warNukeWarn', () => audio.play('alarm'));
     bus.on('warNuke', () => audio.play('explosion'));
-    bus.on('warLost', () => audio.play('wireSnap'));
+    bus.on('warLost', () => {
+      audio.play('wireSnap');
+      this.music.hit('lost');
+    });
+    bus.on('warBlackout', () => audio.play('lightOff'));
+    bus.on('warCounter', () => audio.play('radioBlip'));
+    bus.on('warPlan', () => {
+      audio.play('alarm');
+      this.music.hit('war');
+    });
+    bus.on('warPocket', () => this.music.hit('capture'));
+    bus.on('warGoal', () => this.music.hit('idea'));
+    bus.on('warDeclared', () => {
+      audio.play('alarm');
+      this.music.hit('war');
+    });
+    bus.on('warSurrender', () => audio.play('cocoon'));
+    bus.on('warResearch', () => {
+      audio.play('hatch');
+      this.music.hit('idea');
+    });
+    bus.on('warFocus', () => {
+      audio.play('radioBlip');
+      this.music.hit('idea');
+    });
+    bus.on('warQuarantine', () => audio.play('alarm'));
+    bus.on('zone', () => this.music.hit('capture'));
+    bus.on('scream', (p) => audio.play('cry', { pan: this.pan(p.x), volume: this.near(p.x, p.z) }));
+    bus.on('bark', (d) => audio.play('bark', { pan: this.pan(d.x), volume: this.near(d.x, d.z) }));
     bus.on('order', () => audio.play('uiClick'));
+  }
+
+  applyVolume() {
+    const v = this.volume;
+    this.audio.setVolume(loud(v.all), loud(v.sfx));
+    this.music.setVolume(loud(v.music));
+  }
+
+  setVolume(id, value) {
+    this.volume[id] = value;
+    writeVolume(this.volume);
+    this.applyVolume();
+  }
+
+  // Финал звучит отдельно от игры, поэтому получает итоговую громкость.
+  get finaleVolume() {
+    const v = this.volume;
+    return loud(v.all) * Math.max(loud(v.music), loud(v.sfx));
   }
 
   pan(x) {

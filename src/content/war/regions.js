@@ -53,7 +53,18 @@ const RAW = [
   ['australia', 'Австралия', -31, 146, 'oceania'],
 ];
 
-// Связи через моря и между материками. Внутри материка соседи считаются сами.
+// Морские связи: их легионы проходят только с наукой «Полёт на нитях».
+const SEA = [
+  ['british', 'east_coast'],
+  ['guinea', 'atlantic_south'],
+  ['islands', 'pacific_coast'],
+  ['philippine', 'highlands'],
+  ['archipelago', 'australia'],
+  ['deccan', 'east_africa'],
+  ['arabia', 'east_africa'],
+];
+
+// Связи между материками. Внутри материка соседи считаются сами.
 const LINKS = [
   ['central_asia', 'volga'],
   ['caspian', 'volga'],
@@ -65,12 +76,6 @@ const LINKS = [
   ['iberia', 'maghreb'],
   ['balkans', 'maghreb'],
   ['siberia', 'volga'],
-  ['british', 'east_coast'],
-  ['guinea', 'atlantic_south'],
-  ['islands', 'pacific_coast'],
-  ['philippine', 'highlands'],
-  ['archipelago', 'australia'],
-  ['deccan', 'east_africa'],
 ];
 
 export const START_REGION = 'central_asia';
@@ -83,6 +88,9 @@ function km(a, b) {
   const h = s1 * s1 + Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * s2 * s2;
   return 12742 * Math.asin(Math.sqrt(h));
 }
+
+// Сколько дней идти между регионами.
+export const hopDays = (a, b) => 12 + km(a, b) / 130;
 
 export function buildRegions() {
   const regions = RAW.map(([id, name, lat, lon, land]) => ({ id, name, lat, lon, land, cities: [], pop: 0, neighbors: new Set() }));
@@ -116,6 +124,12 @@ export function buildRegions() {
     for (const o of near.slice(0, 3)) link(r, o);
   }
   for (const [a, b] of LINKS) link(byId[a], byId[b]);
+  for (const r of regions) r.sea = [];
+  for (const [a, b] of SEA) {
+    link(byId[a], byId[b]);
+    byId[a].sea.push(b);
+    byId[b].sea.push(a);
+  }
 
   // Расстояние в шагах от старта задаёт силу гарнизона.
   const hops = new Map([[START_REGION, 0]]);

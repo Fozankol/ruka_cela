@@ -153,6 +153,7 @@ export class Crawlers {
     this.w = innerWidth; this.h = innerHeight;
     for (const c of [this.canvas, this.webCanvas]) { c.width = Math.round(this.w * this.dpr); c.height = Math.round(this.h * this.dpr); }
     this.webKey = -1;
+    this.webKey = -1;
   }
 
   setInfection(v) {
@@ -180,6 +181,8 @@ export class Crawlers {
 
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Скрытое окно бывает нулевого размера: такой холст нельзя рисовать.
+    if (!this.canvas.width || !this.canvas.height) return;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (inf === 0 && !this.spiders.length) return;
 

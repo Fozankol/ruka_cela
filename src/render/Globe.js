@@ -90,7 +90,7 @@ void main(){
 }`;
 
 const EARTH_FS = /* glsl */ `
-uniform sampler2D uMap; uniform sampler2D uTerr; uniform float uSilk; uniform float uTime; uniform vec3 uLight;
+uniform sampler2D uMap; uniform sampler2D uTerr; uniform sampler2D uTint; uniform sampler2D uIds; uniform float uSel; uniform float uHover; uniform float uSilk; uniform float uTime; uniform vec3 uLight;
 varying vec2 vUv; varying vec3 vObj; varying vec3 vN; varying vec3 vV;
 ${NOISE}
 float fiber(vec3 p, vec3 d, float freq, float warp){
@@ -111,6 +111,10 @@ void main(){
   vec3 col = mix(ocean, ground, land) * moon;
   col += vec3(0.05, 0.09, 0.14) * coast * 0.5 * moon;
 
+  // Карта войны: у каждого блока людей свой цвет, у каждого региона свой оттенок.
+  vec4 map = texture2D(uTerr, vUv);
+  col = mix(col, texture2D(uTint, vUv).rgb * (0.55 + 0.45 * moon) * (0.9 + 0.2 * grain), land * 0.9);
+
   // Облака: дрейфующий fbm по точке сферы, без отдельного слоя.
   float c = fbm(vObj * 2.6 + vec3(uTime * 0.012, 0.0, uTime * 0.004));
   float cloud = smoothstep(0.52, 0.78, c) * 0.55;
@@ -119,9 +123,8 @@ void main(){
   // Шёлк: покрытие пятнами растёт с uSilk, волокна в трёх направлениях.
   float spread = fbm(vObj * 1.7 + 3.0);
   float cover = smoothstep(spread - 0.08, spread + 0.08, uSilk * 1.3 - 0.15);
-  // Захваченная земля: шёлк лежит только там, где нарисована территория.
-  float terr = texture2D(uTerr, vUv).r;
-  cover = max(cover, smoothstep(0.32, 0.7, terr + (spread - 0.5) * 0.5) * (0.35 + 0.65 * land));
+  // Захваченная земля: шёлк лежит по границам регионов, край чуть неровный.
+  cover = max(cover, smoothstep(0.34, 0.66, map.r + (spread - 0.5) * 0.3) * land);
   float warp = fbm(vObj * 4.0) * 5.0;
   float f = fiber(vObj, normalize(vec3(0.8, 0.3, 0.5)), 70.0, warp)
           + fiber(vObj, normalize(vec3(-0.2, 0.9, 0.4)), 55.0, warp * 1.3)
@@ -129,6 +132,14 @@ void main(){
   float lambert = 0.32 + 0.68 * max(ndl, 0.0);
   vec3 silk = vec3(0.80, 0.79, 0.75) * (0.82 + 0.18 * grain) * (0.9 + 0.22 * min(f, 1.0)) * lambert;
   col = mix(col, silk, cover);
+
+  // Границы, линия фронта и подсветка региона под курсором.
+  float id = texture2D(uIds, vUv).r * 255.0;
+  float picked = max(step(abs(id - uSel), 0.5) * 0.17, step(abs(id - uHover), 0.5) * 0.1);
+  col += vec3(1.0, 0.95, 0.8) * picked * land * lambert;
+  col = mix(col, vec3(0.62, 0.66, 0.72) * lambert, min(map.g * 2.0, 1.0) * land * 0.5);
+  float beat = 0.65 + 0.35 * sin(uTime * 4.0 + vObj.y * 26.0 + vObj.x * 19.0);
+  col += vec3(2.2, 0.3, 0.16) * min(map.b * 1.7, 1.0) * land * beat;
 
   // Тонкий край атмосферы на самой сфере.
   float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
@@ -197,7 +208,52 @@ void main(){
   gl_FragColor = vec4(c, 1.0);
 }`;
 
+const ARROW_FS = /* glsl */ `
+uniform vec3 uColor; uniform float uTime;
+varying float vT;
+void main(){
+  float dash = 0.55 + 0.45 * sin(vT * 34.0 - uTime * 7.0);
+  gl_FragColor = vec4(uColor * dash, 1.0);
+}`;
+
+const SPARK_VS = /* glsl */ `
+attribute float aLife;
+varying float vL;
+void main(){
+  vL = aLife;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vec3 n = normalize(normalMatrix * position);
+  vL *= step(0.05, dot(n, normalize(-mv.xyz)));
+  gl_PointSize = (10.0 + (1.0 - aLife) * 26.0) * 3.0 / -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+
+const SPARK_FS = /* glsl */ `
+varying float vL;
+void main(){
+  if (vL < 0.01) discard;
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  float a = exp(-d * d * 6.0) * vL;
+  gl_FragColor = vec4(vec3(3.0, 1.3, 0.4) * a, 1.0);
+}`;
+
 const additive = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
+
+/** Стрелка по точкам: бегущая полоса и наконечник на конце. */
+export function arrowMeshes(pts, color, radius, headR) {
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: THREAD_VS,
+    fragmentShader: ARROW_FS,
+    uniforms: { uColor: { value: new THREE.Color(...color) }, uTime: { value: 0 } },
+    ...additive,
+  });
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, radius, 6, false), mat);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(headR, headR * 2.7, 10), new THREE.MeshBasicMaterial({ color: new THREE.Color(...color), ...additive }));
+  head.position.copy(pts[pts.length - 1]);
+  head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), curve.getTangent(1));
+  return { mesh, head };
+}
 
 export class Globe {
   constructor(scene) {
@@ -218,12 +274,17 @@ export class Globe {
       fragmentShader: EARTH_FS,
       uniforms: {
         uMap: { value: this.landTex },
-        uTerr: { value: this.makeTerritory() },
+        uTerr: { value: null },
+        uTint: { value: null },
+        uIds: { value: null },
+        uSel: { value: -1 },
+        uHover: { value: -1 },
         uSilk: { value: 0 },
         uTime: { value: 0 },
         uLight: { value: new THREE.Vector3(-0.6, 0.35, 0.75).normalize() },
       },
     });
+    this.makeMapTextures();
     this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), this.earthMat);
     this.planet.add(this.earth);
 
@@ -261,51 +322,197 @@ export class Globe {
     this.planet.add(this.cities);
 
     this.threads = [];
+    this.arrows = [];
+
+    const SPARKS = 48;
+    const sparkPos = new Float32Array(SPARKS * 3);
+    const sparkLife = new Float32Array(SPARKS);
+    const sparkGeo = new THREE.BufferGeometry();
+    sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+    sparkGeo.setAttribute('aLife', new THREE.BufferAttribute(sparkLife, 1));
+    this.sparks = new THREE.Points(sparkGeo, new THREE.ShaderMaterial({ vertexShader: SPARK_VS, fragmentShader: SPARK_FS, ...additive }));
+    this.sparks.frustumCulled = false;
+    this.sparks.renderOrder = 5;
+    this.planet.add(this.sparks);
+    this.sparkData = { pos: sparkPos, life: sparkLife, geo: sparkGeo, next: 0 };
   }
 
-  makeTerritory() {
-    const cv = document.createElement('canvas');
-    cv.width = 1024;
-    cv.height = 512;
-    this.terrCtx = cv.getContext('2d');
-    this.terrCtx.fillRect(0, 0, 1024, 512);
-    this.terrTex = new THREE.CanvasTexture(cv);
-    this.terrTex.wrapS = THREE.RepeatWrapping;
-    this.terrTex.generateMipmaps = false;
-    this.terrTex.minFilter = THREE.LinearFilter;
-    return this.terrTex;
-  }
-
-  /** Рисует захваченные регионы: мягкие пятна вокруг центра и городов. */
-  paintTerritory(regions) {
-    const x = this.terrCtx;
-    x.globalCompositeOperation = 'source-over';
-    x.fillStyle = '#000';
-    x.fillRect(0, 0, 1024, 512);
-    x.globalCompositeOperation = 'lighter';
-    const blob = (lat, lon, deg) => {
-      const px = ((lon + 180) / 360) * 1024;
-      const py = ((90 - lat) / 180) * 512;
-      const r = (deg / 360) * 1024;
-      const w = 1 / Math.max(0.3, Math.cos(lat * DEG));
-      x.save();
-      x.translate(px, py);
-      x.scale(w, 1);
-      const g = x.createRadialGradient(0, 0, 0, 0, 0, r);
-      g.addColorStop(0, 'rgba(255,0,0,0.9)');
-      g.addColorStop(0.6, 'rgba(255,0,0,0.6)');
-      g.addColorStop(1, 'rgba(255,0,0,0)');
-      x.fillStyle = g;
-      x.beginPath();
-      x.arc(0, 0, r, 0, Math.PI * 2);
-      x.fill();
-      x.restore();
+  makeMapTextures() {
+    const W = 2048;
+    const H = 1024;
+    this.mapW = W;
+    this.mapH = H;
+    const tex = (data, format, nearest) => {
+      const t = new THREE.DataTexture(data, W, H, format, THREE.UnsignedByteType);
+      t.wrapS = THREE.RepeatWrapping;
+      t.magFilter = nearest ? THREE.NearestFilter : THREE.LinearFilter;
+      t.minFilter = nearest ? THREE.NearestFilter : THREE.LinearMipmapLinearFilter;
+      t.generateMipmaps = !nearest;
+      t.needsUpdate = true;
+      return t;
     };
-    for (const r of regions) {
-      blob(r.lat, r.lon, 11);
-      for (const c of r.cities) blob(c.lat, c.lon, 7);
+    this.terrData = new Uint8Array(W * H * 4);
+    this.tintData = new Uint8Array(W * H * 4);
+    this.ids = new Uint8Array(W * H);
+    this.idData = new Uint8Array(W * H * 4);
+    this.terrTex = tex(this.terrData, THREE.RGBAFormat);
+    this.tintTex = tex(this.tintData, THREE.RGBAFormat);
+    this.idTex = tex(this.idData, THREE.RGBAFormat, true);
+    const u = this.earthMat.uniforms;
+    u.uTerr.value = this.terrTex;
+    u.uTint.value = this.tintTex;
+    u.uIds.value = this.idTex;
+  }
+
+  /** Делит сферу на регионы: каждая точка принадлежит ближайшему центру. */
+  initMap(regions, tints) {
+    const W = this.mapW;
+    const H = this.mapH;
+    const n = regions.length;
+    const cx = new Float64Array(n);
+    const cy = new Float64Array(n);
+    const cz = new Float64Array(n);
+    regions.forEach((r, i) => {
+      const c = latLonToVec3(r.lat, r.lon);
+      cx[i] = c.x;
+      cy[i] = c.y;
+      cz[i] = c.z;
+    });
+    const cosLon = new Float64Array(W);
+    const sinLon = new Float64Array(W);
+    for (let x = 0; x < W; x++) {
+      const lo = (-180 + ((x + 0.5) / W) * 360) * DEG;
+      cosLon[x] = Math.cos(lo);
+      sinLon[x] = Math.sin(lo);
+    }
+    let o = 0;
+    for (let y = 0; y < H; y++) {
+      const la = (-90 + ((y + 0.5) / H) * 180) * DEG;
+      const cosLat = Math.cos(la);
+      const sinLat = Math.sin(la);
+      for (let x = 0; x < W; x++) {
+        const vx = cosLat * cosLon[x];
+        const vz = -cosLat * sinLon[x];
+        let best = 0;
+        let bestD = -2;
+        for (let i = 0; i < n; i++) {
+          const d = vx * cx[i] + sinLat * cy[i] + vz * cz[i];
+          if (d > bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        this.ids[o] = best;
+        this.idData[o * 4] = best;
+        this.idData[o * 4 + 3] = 255;
+        const c = tints[best];
+        this.tintData[o * 4] = c[0];
+        this.tintData[o * 4 + 1] = c[1];
+        this.tintData[o * 4 + 2] = c[2];
+        this.tintData[o * 4 + 3] = 255;
+        o++;
+      }
+    }
+    this.idTex.needsUpdate = true;
+    this.tintTex.needsUpdate = true;
+  }
+
+  /** Перерисовывает владельцев: R шёлк, G границы регионов, B линия фронта. */
+  repaintMap(owned) {
+    const W = this.mapW;
+    const H = this.mapH;
+    const { ids, terrData: d } = this;
+    d.fill(0);
+    const front = [];
+    for (let y = 0; y < H; y++) {
+      const y2 = Math.min(H - 1, y + 1);
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const a = ids[i];
+        const right = ids[y * W + ((x + 1) % W)];
+        const down = ids[y2 * W + x];
+        const o = i * 4;
+        d[o] = owned[a] ? 255 : 0;
+        d[o + 3] = 255;
+        if (a !== right || a !== down) d[o + 1] = 255;
+        if (owned[a] !== owned[right] || owned[a] !== owned[down]) front.push(x, y);
+      }
+    }
+    for (let k = 0; k < front.length; k += 2) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const y = front[k + 1] + dy;
+          if (y < 0 || y >= H) continue;
+          d[(y * W + ((front[k] + dx + W) % W)) * 4 + 2] = 255;
+        }
+      }
     }
     this.terrTex.needsUpdate = true;
+  }
+
+  /** Сразу выставляет огням целевую яркость, без плавного перехода. */
+  snapLights() {
+    const attr = this.cities.geometry.attributes.aLight;
+    attr.array.set(this.lightTarget);
+    attr.needsUpdate = true;
+  }
+
+  setPicked(sel, hover) {
+    this.earthMat.uniforms.uSel.value = sel;
+    this.earthMat.uniforms.uHover.value = hover;
+  }
+
+  /** Индекс региона под лучом мыши или -1. */
+  pickRegion(ray) {
+    const hit = ray.intersectSphere(new THREE.Sphere(new THREE.Vector3(), 1), new THREE.Vector3());
+    if (!hit) return -1;
+    this.planet.worldToLocal(hit).normalize();
+    const lat = Math.asin(hit.y) / DEG;
+    const lon = Math.atan2(-hit.z, hit.x) / DEG;
+    const x = Math.floor(((lon + 180) / 360) * this.mapW) % this.mapW;
+    const y = Math.min(this.mapH - 1, Math.floor(((lat + 90) / 180) * this.mapH));
+    return this.ids[y * this.mapW + x];
+  }
+
+  /** Стрелка удара: бегущая полоса вдоль дуги и наконечник. */
+  addArrow(a, b, color) {
+    const va = latLonToVec3(a.lat, a.lon);
+    const vb = latLonToVec3(b.lat, b.lon);
+    const angle = va.angleTo(vb);
+    const qb = new THREE.Quaternion().setFromUnitVectors(va, vb);
+    const q = new THREE.Quaternion();
+    const qa = new THREE.Quaternion();
+    const pts = [];
+    for (let k = 0; k <= 32; k++) {
+      const t = k / 32;
+      q.copy(qa).slerp(qb, t);
+      pts.push(va.clone().applyQuaternion(q).setLength(1.008 + Math.sin(Math.PI * t) * (0.02 + 0.12 * angle)));
+    }
+    const arrow = arrowMeshes(pts, color, 0.0075, 0.03);
+    arrow.mesh.renderOrder = 4;
+    arrow.head.renderOrder = 4;
+    this.planet.add(arrow.mesh, arrow.head);
+    this.arrows.push(arrow);
+    return arrow;
+  }
+
+  removeArrow(arrow) {
+    this.planet.remove(arrow.mesh, arrow.head);
+    arrow.mesh.geometry.dispose();
+    arrow.mesh.material.dispose();
+    arrow.head.geometry.dispose();
+    arrow.head.material.dispose();
+    this.arrows = this.arrows.filter((x) => x !== arrow);
+  }
+
+  /** Вспышка боя на поверхности. */
+  spark(lat, lon) {
+    const s = this.sparkData;
+    const i = s.next;
+    s.next = (i + 1) % s.life.length;
+    latLonToVec3(lat, lon, 1.006).toArray(s.pos, i * 3);
+    s.life[i] = 1;
+    s.geo.attributes.position.needsUpdate = true;
   }
 
   /** Яркость огней города, 0..1. Меняется плавно в update(). */
@@ -369,6 +576,11 @@ export class Globe {
     }
     if (changed) attr.needsUpdate = true;
 
+    for (const a of this.arrows) a.mesh.material.uniforms.uTime.value = this.time;
+    const s = this.sparkData;
+    for (let i = 0; i < s.life.length; i++) s.life[i] = Math.max(0, s.life[i] - dt * 2);
+    s.geo.attributes.aLife.needsUpdate = true;
+
     for (const t of this.threads) {
       const u = t.mesh.material.uniforms;
       u.uTime.value = this.time;
@@ -380,7 +592,9 @@ export class Globe {
     this.scene.remove(this.group);
     for (const t of this.threads) { t.mesh.geometry.dispose(); t.mesh.material.dispose(); }
     this.threads.length = 0;
-    for (const m of [this.earth, this.atmosphere, this.cities]) { m.geometry.dispose(); m.material.dispose(); }
+    for (const a of [...this.arrows]) this.removeArrow(a);
+    for (const m of [this.earth, this.atmosphere, this.cities, this.sparks]) { m.geometry.dispose(); m.material.dispose(); }
     this.landTex.dispose();
+    for (const t of [this.terrTex, this.tintTex, this.idTex]) t.dispose();
   }
 }

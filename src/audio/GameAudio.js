@@ -33,6 +33,7 @@ export class GameAudio {
   constructor() {
     this.ctx = null;
     this.level = 0.85;
+    this.sfxLevel = 1;
     this.dread = 0;
     this.pendingDread = 0;
   }
@@ -58,14 +59,17 @@ export class GameAudio {
     limiter.release.value = 0.18;
     this.master.connect(limiter);
     limiter.connect(ctx.destination);
+    this.sfx = ctx.createGain();
+    this.sfx.gain.value = this.sfxLevel;
+    this.sfx.connect(this.master);
 
     this.dry = ctx.createGain();
-    this.dry.connect(this.master);
+    this.dry.connect(this.sfx);
     const reverb = ctx.createConvolver();
     reverb.buffer = roomImpulse(ctx, 1.5, 3);
     this.send = ctx.createGain();
     this.send.connect(reverb);
-    reverb.connect(this.master);
+    reverb.connect(this.sfx);
 
     this.white = noiseBuffer(ctx, 2, false);
     this.brown = noiseBuffer(ctx, 5, true);
@@ -76,6 +80,12 @@ export class GameAudio {
   setMaster(v) {
     this.level = v;
     if (this.master) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
+
+  setVolume(all, sfx) {
+    this.setMaster(0.85 * all);
+    this.sfxLevel = sfx;
+    if (this.sfx) this.sfx.gain.setTargetAtTime(sfx, this.ctx.currentTime, 0.05);
   }
 
   now(at = 0) {
@@ -153,7 +163,7 @@ export class GameAudio {
     this.roomGain.gain.value = 0.055;
     room.connect(lp);
     lp.connect(this.roomGain);
-    this.roomGain.connect(this.master);
+    this.roomGain.connect(this.sfx);
     room.start();
     wobble.start();
 
@@ -166,7 +176,7 @@ export class GameAudio {
       o.connect(this.droneGain);
       o.start();
     }
-    this.droneGain.connect(this.master);
+    this.droneGain.connect(this.sfx);
 
     // Диссонанс появляется только ближе к концу.
     this.padGain = ctx.createGain();
@@ -188,7 +198,7 @@ export class GameAudio {
     hum.frequency.value = 100;
     hum.connect(this.humGain);
     hum.start();
-    this.humGain.connect(this.master);
+    this.humGain.connect(this.sfx);
 
     // Жужжание мух.
     this.flyGain = ctx.createGain();
@@ -288,6 +298,12 @@ export class GameAudio {
     heartbeat(pan, v, at) {
       this.tone({ freq: 60, to: 38, dur: 0.15, gain: 0.5 * v, wet: 0.08, at });
       this.tone({ freq: 54, to: 36, dur: 0.17, gain: 0.34 * v, wet: 0.08, at: at + 0.25 });
+    },
+    bark(pan, v, at) {
+      for (let i = 0; i < 2; i++) {
+        this.tone({ type: 'sawtooth', freq: 420, to: 190, dur: 0.1, gain: 0.16 * v, pan, wet: 0.35, at: at + i * 0.17 });
+        this.noise({ freq: 900, to: 420, q: 1.2, dur: 0.08, gain: 0.14 * v, pan, wet: 0.35, at: at + i * 0.17 });
+      }
     },
     uiClick(pan, v, at) {
       this.tone({ type: 'square', freq: 880, to: 640, dur: 0.025, gain: 0.03 * v, wet: 0.05, at });

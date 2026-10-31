@@ -1,12 +1,14 @@
 import { dist } from '../../core/util.js';
 import { goTo, lieDown, setState, stomp, wake } from '../../sim/humans.js';
 import { FOOD_GOAL } from '../../sim/world.js';
+import { RadioFeed } from './feed.js';
 
 const ROOM_LAMPS = ['bedroom', 'hall', 'kitchen', 'bath', 'grandpa'];
 
 // Сценарий первого масштаба: вступление, сбор вкусняшек, изгнание жильцов.
 export class HouseScript {
   constructor(world) {
+    this.feed = new RadioFeed(world.bus, 'house');
     this.w = world;
     this.step = 'idle';
     this.t = 0;
@@ -96,7 +98,7 @@ export class HouseScript {
       w.setBeacon(null);
       w.setObjective('');
       this.cam('room');
-      w.bus.emit('radio', { who: 'Отец', text: 'Паук. Здоровый. Убежал за шкаф.' });
+      w.bus.emit('radio', { who: 'Папа', text: 'Паук. Здоровый. Убежал за шкаф.' });
       goTo(w, h.father, p.hand.x + 0.45, p.hand.z + 0.5, () => {
         lieDown(h.father);
         w.setLamp('bedroom', false);
@@ -139,7 +141,7 @@ export class HouseScript {
         if (hm.state === 'sleep') wake(w, hm, run);
         else run();
       }
-      w.bus.emit('radio', { who: 'Мать', text: 'Они повсюду! Все на улицу! Лена, не отставай!' });
+      w.bus.emit('radio', { who: 'Мама', text: 'Они повсюду! Все на улицу! Лена, не отставай!' });
     },
     done: () => {
       const { w } = this;
@@ -209,7 +211,7 @@ export class HouseScript {
   goToBed(m) {
     const { w } = this;
     goTo(w, m, m.standX, m.standZ, () => {
-      if (dist(m.x, m.z, m.standX, m.standZ) < 0.6) lieDown(m);
+      if (dist(m.x, m.z, m.standX, m.standZ) < 0.6 || m.field[w.grid.at(m.x, m.z)] === 0) lieDown(m);
       else this.goToBed(m);
     }, 1.5);
   }
@@ -277,9 +279,12 @@ export class HouseScript {
         break;
       case 'gather':
         this.keepSwarm(dt);
+        this.feed.update((w.food / FOOD_GOAL) * 0.66);
         if (w.food >= FOOD_GOAL) this.go('win');
         break;
       case 'win':
+        if (this.t > 3) this.feed.update(0.67);
+        if (this.t > 5.5) this.feed.update(0.84);
         if (this.t > 8 || Object.values(h).every((m) => m.state === 'gone')) this.go('done');
         break;
       default:
