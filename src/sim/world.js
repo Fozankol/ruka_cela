@@ -176,8 +176,9 @@ export class World {
   setMark(x, z, fromClick = false) {
     if (fromClick) this.stats.clicks++;
     if (!this.mark) this.mark = { x, z };
-    this.mark.x = x;
-    this.mark.z = z;
+    const p = this.markLimit ? this.markLimit(x, z) : { x, z };
+    this.mark.x = p.x;
+    this.mark.z = p.z;
     this.markDirty = true;
     this.bus.emit('mark', this.mark);
   }

@@ -47,6 +47,7 @@ export class HouseScript {
       this.prompt(null);
       w.setBeacon(p.hand);
       w.setObjective('Кликай по полу, чтобы ползти. Цель: рука.');
+      this.limitToHand();
     },
     atHand: () => {
       this.w.setBeacon(null);
@@ -76,6 +77,7 @@ export class HouseScript {
     flee: () => {
       const { w, p } = this;
       w.heroLocked = false;
+      this.limitToBedroom();
       w.setBeacon(p.crack);
       w.setObjective('В щель за шкафом! Быстрее!');
       this.cam('flee', true);
@@ -84,6 +86,7 @@ export class HouseScript {
     hidden: () => {
       const { w, p, h } = this;
       w.hero.hidden = true;
+      w.markLimit = null;
       w.setBeacon(null);
       w.setObjective('Не двигайся.');
       this.cam('room');
@@ -349,6 +352,28 @@ export class HouseScript {
     // Отец и мать бродят, пока рой занят стариком.
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.father);
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.mother);
+  }
+
+  // Вступление короткое: паук ползёт только по дорожке от старта к руке.
+  limitToHand() {
+    const { w, p } = this;
+    const cx = (p.start.x + p.hand.x) / 2;
+    const cz = (p.start.z + p.hand.z) / 2;
+    const r = dist(p.start.x, p.start.z, p.hand.x, p.hand.z) / 2 + 0.3;
+    w.markLimit = (x, z) => {
+      const d = dist(x, z, cx, cz);
+      return d <= r ? { x, z } : { x: cx + ((x - cx) * r) / d, z: cz + ((z - cz) * r) / d };
+    };
+  }
+
+  // Во время побега дверь закрыта для игрока: путь только к щели.
+  limitToBedroom() {
+    const { w, p } = this;
+    const x0 = p.start.x - 3.6;
+    const x1 = p.crack.x + 0.1;
+    const z0 = p.crack.z - 0.1;
+    const z1 = p.start.z + 1.45;
+    w.markLimit = (x, z) => ({ x: Math.max(x0, Math.min(x1, x)), z: Math.max(z0, Math.min(z1, z)) });
   }
 
   // Свет людей конечен. Без телефонов они слепнут, и рой берёт их числом.
