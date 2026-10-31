@@ -318,6 +318,7 @@ export class HouseScript {
         if (this.t > 5) this.go('grandpa');
         break;
       case 'hunt': {
+        this.drainBatteries(dt);
         const down = (x) => x.state === 'cocoon';
         if (down(h.father) && down(h.mother)) this.go('still');
         break;
@@ -348,6 +349,27 @@ export class HouseScript {
     // Отец и мать бродят, пока рой занят стариком.
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.father);
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.mother);
+  }
+
+  // Свет людей конечен. Без телефонов они слепнут, и рой берёт их числом.
+  drainBatteries(dt) {
+    const { w, h } = this;
+    this.battery = (this.battery ?? 75) - dt;
+    for (const m of [h.father, h.mother]) {
+      if (!m.torch) continue;
+      if (this.battery < 6) m.torch.power = 1.05 * (Math.sin(w.t * 37) > 0.2 ? 1 : 0.15);
+      if (this.battery <= 0) dropTorch(w, m);
+    }
+    if (!this.lowSaid && this.battery < 22) {
+      this.lowSaid = true;
+      w.bus.emit('radio', { who: 'Отец', text: 'Два процента. Телефон сейчас сядет.' });
+      w.setObjective('Их свет кончается. Копи рой в темноте и жди.');
+    }
+    if (!this.outSaid && this.battery <= 0) {
+      this.outSaid = true;
+      w.say('Темнота.', { ms: 2600 });
+      w.setObjective('Они ослепли. Теперь бери их.');
+    }
   }
 
   hatchNow() {
