@@ -166,6 +166,10 @@ export class Atmosphere {
     this.coneDir = new THREE.Vector3();
   }
 
+  dispose() {
+    this.stage.scene.remove(this.group);
+  }
+
   update() {
     const r = this.stage.rig;
     const u = this.dust.material.uniforms;

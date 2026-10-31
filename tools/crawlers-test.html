@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Пауки поверх интерфейса: тест</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b0e; color: #ddd; font: 15px system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 24px; display: grid; gap: 18px; }
+  .panel { background: rgba(20,20,26,.8); border: 1px solid #333; border-radius: 8px; padding: 16px; display: grid; gap: 10px; }
+  button { background: #1a1a20; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 8px 14px; cursor: pointer; font: inherit; }
+  button:hover { border-color: #c33; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  code, #count, #fps { font-family: ui-monospace, monospace; color: #c66; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Заражение интерфейса</h1>
+  <div class="panel">
+    <label for="inf">Заражение: <span id="infVal">0.00</span></label>
+    <input id="inf" type="range" min="0" max="1" step="0.01" value="0" />
+    <div class="row">
+      <button id="spawn" type="button">Выпустить паука</button>
+      <button id="click" type="button">Проверка клика</button>
+      <span>Нажатий: <span id="count">0</span></span>
+      <span id="fps">FPS: …</span>
+    </div>
+  </div>
+  <div class="panel">
+    <p>Шёлк <code>1 240</code> · Соки <code>310</code> · Тревога <code>42%</code></p>
+    <p>При 0 слой пуст. При 1 углы затянуты паутиной, пауки пробегают чаще, иногда через курсор. Кнопки должны нажиматься сквозь слой.</p>
+  </div>
+</main>
+<script type="module">
+import { Crawlers } from '../src/ui/crawlers.js';
+
+const crawlers = new Crawlers();
+window.__crawlers = crawlers;
+const inf = document.getElementById('inf');
+inf.addEventListener('input', () => {
+  crawlers.setInfection(Number(inf.value));
+  document.getElementById('infVal').textContent = Number(inf.value).toFixed(2);
+});
+document.getElementById('spawn').addEventListener('click', () => crawlers.spawn());
+let n = 0;
+document.getElementById('click').addEventListener('click', () => { document.getElementById('count').textContent = String(++n); });
+
+let last = performance.now(), frames = 0, acc = 0;
+function loop(now) {
+  const dt = (now - last) / 1000; last = now;
+  crawlers.update(dt);
+  frames++; acc += dt;
+  if (acc >= 1) { document.getElementById('fps').textContent = 'FPS: ' + Math.round(frames / acc); frames = 0; acc = 0; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

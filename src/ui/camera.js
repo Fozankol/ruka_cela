@@ -20,13 +20,13 @@ export class CameraInput {
     c.addEventListener('pointerdown', (e) => {
       this.mx = e.clientX;
       this.my = e.clientY;
-      if (world.rts) {
+      if (this.world.rts) {
         this.press = { x: e.clientX, y: e.clientY, moved: false };
         return;
       }
       const hit = stage.pick(e.clientX, e.clientY);
       if (hit) {
-        world.setMark(hit.x, hit.z, true);
+        this.world.setMark(hit.x, hit.z, true);
         this.holding = true;
       }
     });
@@ -40,9 +40,9 @@ export class CameraInput {
           stage.rig.goal.z -= (e.clientY - this.my) * k;
         }
       }
-      if (this.holding && !world.rts) {
+      if (this.holding && !this.world.rts) {
         const hit = stage.pick(e.clientX, e.clientY);
-        if (hit) world.setMark(hit.x, hit.z);
+        if (hit) this.world.setMark(hit.x, hit.z);
       }
       this.mx = e.clientX;
       this.my = e.clientY;
@@ -59,7 +59,8 @@ export class CameraInput {
         if (!stage.rig.userPan) return;
         e.preventDefault();
         const r = stage.rig;
-        r.goalDist = Math.max(4, Math.min(24, r.goalDist * (1 + Math.sign(e.deltaY) * 0.12)));
+        const far = this.world.level.cfg?.camera.dist * 1.2 || 24;
+        r.goalDist = Math.max(far * 0.17, Math.min(far, r.goalDist * (1 + Math.sign(e.deltaY) * 0.12)));
       },
       { passive: false },
     );
@@ -67,9 +68,9 @@ export class CameraInput {
       this.keys.add(e.code);
       if (e.code === 'Space') {
         e.preventDefault();
-        world.script?.action();
+        this.world.script?.action();
       }
-      if (e.code === 'KeyZ' && world.rts) this.hud.handlers.buy?.();
+      if (e.code === 'KeyZ' && this.world.rts) this.hud.handlers.buy?.();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
   }
@@ -88,15 +89,31 @@ export class CameraInput {
     return best;
   }
 
+  // Красная метка под курсором, по ней игрок снимает рабочего во время тревоги.
+  markAt(x, y) {
+    let best = null;
+    let bestD = 46;
+    for (const m of this.world.exposedMarks()) {
+      V.set(m.x, 0.08, m.z).project(this.stage.camera);
+      const d = Math.hypot((V.x + 1) * 0.5 * innerWidth - x, (1 - V.y) * 0.5 * innerHeight - y);
+      if (d < bestD) {
+        bestD = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+
   click(x, y) {
     const w = this.world;
     if (!w.rts) return;
-    const t = this.treatAt(x, y);
-    if (!t) return;
     if (w.alarmOn) {
-      this.hud.notice('Сейчас тревога: все в укрытиях');
+      const m = this.markAt(x, y);
+      if (m) w.recall(m.s);
       return;
     }
+    const t = this.treatAt(x, y);
+    if (!t) return;
     if (w.dispatch(t)) {
       w.stats.clicks++;
       w.bus.emit('order', { x: t.x, z: t.z });
@@ -117,9 +134,10 @@ export class CameraInput {
       r.goal.z = Math.max(0, Math.min(L.worldD, r.goal.z));
     }
     const over = document.elementFromPoint(this.mx, this.my) === this.stage.renderer.domElement;
-    const t = this.world.rts && over ? this.treatAt(this.mx, this.my) : null;
-    this.hover = t;
-    document.body.classList.toggle('aiming', !!t);
-    this.hud.setTip(t && { label: `${t.name} +${t.value}` }, this.mx, this.my);
+    const alarm = this.world.alarmOn;
+    const m = this.world.rts && over && alarm ? this.markAt(this.mx, this.my) : null;
+    const t = this.world.rts && over && !alarm ? this.treatAt(this.mx, this.my) : null;
+    document.body.classList.toggle('aiming', !!(t || m));
+    this.hud.setTip(m ? { label: 'Снять рабочего' } : t && { label: `${t.name} +${t.value}` }, this.mx, this.my);
   }
 }

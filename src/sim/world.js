@@ -9,11 +9,7 @@ export const SPIDERS = {
 };
 
 export const FOOD_GOAL = 100;
-const WORKER_COST = 8;
-const WORKER_COST_STEP = 4;
-const WORKER_MAX = 8;
-const ALERT_PER_FOOD = 1.3;
-const ALERT_DECAY = 0.45;
+const DEFAULT_RULES = { goal: FOOD_GOAL, alertPer: 1.3, startWorkers: 2, workerCap: 8, workerCost: 8, workerStep: 4, decay: 0.45, treats: 9 };
 const ALERT_REST = 6.5;
 const ALERT_SAFE = 45;
 const HIDE_BOOST = 1.35;
@@ -26,11 +22,14 @@ const TREATS = [
 const STEP = { x: 0, z: 0 };
 
 export class World {
-  constructor(level, seed = 7) {
+  constructor(level, seed = 7, bus = new Bus()) {
     this.level = level;
     this.grid = level.grid;
     this.rng = new RNG(seed);
-    this.bus = new Bus();
+    this.bus = bus;
+    this.rules = { ...DEFAULT_RULES, ...level.rules };
+    this.unitK = level.unitK ?? 1;
+    this.speedK = level.speedK ?? 1;
     this.t = 0;
     this.food = 0;
     this.alert = 0;
@@ -109,6 +108,7 @@ export class World {
     const def = SPIDERS[kind];
     const s = {
       id: this.nextId++,
+      world: this,
       kind,
       x,
       z,
@@ -138,11 +138,11 @@ export class World {
 
   // Рабочий стоит еду, то есть отодвигает победу, но окупается на дистанции.
   workerCost() {
-    return WORKER_COST + this.bought * WORKER_COST_STEP;
+    return this.rules.workerCost + this.bought * this.rules.workerStep;
   }
 
   buyWorker() {
-    if (this.count('carrier') >= WORKER_MAX) return 'В гнезде нет места';
+    if (this.count('carrier') >= this.rules.workerCap) return 'В гнезде нет места';
     const cost = this.workerCost();
     if (this.food < cost) return 'Не хватает еды';
     this.food -= cost;
@@ -194,7 +194,7 @@ export class World {
       z: p.z,
       name: look.name,
       color: look.color,
-      value: Math.round(2 + dist(p.x, p.z, home.x, home.z) * 0.7),
+      value: Math.round(2 + dist(p.x, p.z, home.x, home.z) * 0.7 * (this.level.valueK ?? 1)),
       worker: null,
       queued: false,
       field: this.grid.flow(p.x, p.z, 'spider'),
@@ -321,12 +321,15 @@ export class World {
     }
     const o = s.order;
     if (!o) {
-      if (s.kind === 'carrier' && !this.alarmOn) this.stepIdle(s, def, dt);
+      if (s.kind !== 'carrier') return;
+      if (this.alarmOn) this.sendToShelter(s);
+      else this.stepIdle(s, def, dt);
       return;
     }
-    if (o.type === 'fetch') this.stepFetch(s, o, def.speed, dt);
-    else if (o.type === 'hide') this.stepHide(s, o, def.speed * HIDE_BOOST, dt);
-    else if (o.type === 'move') this.stepMove(s, o, def.speed, dt);
+    const speed = def.speed * this.speedK;
+    if (o.type === 'fetch') this.stepFetch(s, o, speed, dt);
+    else if (o.type === 'hide') this.stepHide(s, o, speed * HIDE_BOOST, dt);
+    else if (o.type === 'move') this.stepMove(s, o, speed, dt);
   }
 
   // Свободный рабочий ждёт у гнезда на своём месте, а не в общей куче.
@@ -337,12 +340,12 @@ export class World {
     }
     const n = this.nests[0];
     const a = s.id * 2.4;
-    const r = 0.45 + (s.id % 3) * 0.16;
+    const r = (0.45 + (s.id % 3) * 0.16) * this.unitK;
     const x = n.x - 0.55 + Math.cos(a) * r;
     const z = n.z + 0.7 + Math.sin(a) * r;
     if (dist(s.x, s.z, x, z) > 0.1 && this.grid.spiderOk(this.grid.at(x, z))) {
-      if (dist(s.x, s.z, x, z) < 0.5) this.steer(s, x, z, def.speed * 0.5, dt);
-      else this.followField(s, n.field, def.speed * 0.8, dt);
+      if (dist(s.x, s.z, x, z) < 0.5 * this.unitK) this.steer(s, x, z, def.speed * this.speedK * 0.5, dt);
+      else this.followField(s, n.field, def.speed * this.speedK * 0.8, dt);
     }
   }
 
@@ -354,7 +357,7 @@ export class World {
   stepFetch(s, o, speed, dt) {
     if (o.phase === 'back') {
       const n = this.nests[0];
-      if (dist(s.x, s.z, n.x, n.z) < 0.45) {
+      if (dist(s.x, s.z, n.x, n.z) < 0.45 * this.unitK) {
         this.deposit(s);
         return;
       }
@@ -362,7 +365,7 @@ export class World {
       return;
     }
     const t = o.t;
-    if (dist(s.x, s.z, t.x, t.z) < 0.2) {
+    if (dist(s.x, s.z, t.x, t.z) < 0.2 * this.unitK) {
       s.load = t.value;
       o.phase = 'back';
       this.bus.emit('ripple', { x: t.x, z: t.z, power: 0.4, kind: 'hatch' });
@@ -373,9 +376,9 @@ export class World {
   }
 
   deposit(s) {
-    this.food = Math.min(FOOD_GOAL, this.food + s.load);
+    this.food = Math.min(this.rules.goal, this.food + s.load);
     this.stats.gathered += s.load;
-    if (!this.alarmOn) this.alert = clamp(this.alert + s.load * ALERT_PER_FOOD, 0, 100);
+    if (!this.alarmOn) this.alert = clamp(this.alert + s.load * this.rules.alertPer, 0, 100);
     this.bus.emit('deposit', { x: s.x, z: s.z, v: s.load });
     this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.3, kind: 'hatch' });
     s.load = 0;
@@ -391,21 +394,45 @@ export class World {
     this.queue = [];
     for (const s of this.spiders) {
       if (s.kind !== 'carrier') continue;
-      let best = null;
-      let bestD = Infinity;
-      for (const c of this.level.shelters) {
-        const steps = c.field[this.grid.at(s.x, s.z)];
-        if (steps >= 0 && steps < bestD) {
-          bestD = steps;
-          best = c;
-        }
-      }
-      s.order = best ? { type: 'hide', shelter: best } : null;
+      if (s.order?.type === 'fetch') s.exposed = true;
+      else this.sendToShelter(s);
     }
   }
 
+  sendToShelter(s) {
+    let best = null;
+    let bestD = Infinity;
+    for (const c of this.level.shelters) {
+      const steps = c.field[this.grid.at(s.x, s.z)];
+      if (steps >= 0 && steps < bestD) {
+        bestD = steps;
+        best = c;
+      }
+    }
+    s.exposed = false;
+    s.order = best ? { type: 'hide', shelter: best } : null;
+  }
+
+  // Рабочий с заданием сам его не бросит: игрок снимает его кликом по красной метке.
+  recall(s) {
+    if (s.order?.t) s.order.t.worker = null;
+    this.sendToShelter(s);
+    this.bus.emit('order', { x: s.x, z: s.z });
+  }
+
+  // Где показывать красную метку: на вкусняшке, а если рабочий уже несёт её, то на нём самом.
+  exposedMarks() {
+    const out = [];
+    for (const s of this.spiders) {
+      if (!s.exposed) continue;
+      const t = s.order?.phase === 'go' ? s.order.t : null;
+      out.push({ s, x: t ? t.x : s.x, z: t ? t.z : s.z });
+    }
+    return out;
+  }
+
   stepHide(s, o, speed, dt) {
-    if (dist(s.x, s.z, o.shelter.x, o.shelter.z) < 0.3) {
+    if (dist(s.x, s.z, o.shelter.x, o.shelter.z) < 0.3 * this.unitK) {
       s.hidden = true;
       s.order = null;
       return;
@@ -417,6 +444,10 @@ export class World {
     for (const s of this.spiders) {
       if (s.kind !== 'carrier') continue;
       s.hidden = false;
+      if (s.exposed) {
+        s.exposed = false;
+        continue;
+      }
       s.order = s.load > 0 ? { type: 'fetch', phase: 'back' } : null;
     }
   }
@@ -444,7 +475,7 @@ export class World {
   swat() {}
 
   slipperHit(h, x, z) {
-    const r = 0.36;
+    const r = this.level.stompR ?? 0.36;
     this.bus.emit('slipper', { x, z, phase: 'hit', life: 0.3 });
     this.bus.emit('ripple', { x, z, power: 1.6, kind: 'stomp' });
     this.bus.emit('shake', 0.9);
@@ -465,7 +496,7 @@ export class World {
       for (let j = i + 1; j < list.length; j++) {
         const b = list[j];
         if (b.hidden) continue;
-        const min = (SPIDERS[a.kind].scale + SPIDERS[b.kind].scale) * 1.1;
+        const min = (SPIDERS[a.kind].scale + SPIDERS[b.kind].scale) * 1.1 * this.unitK;
         const dx = b.x - a.x;
         const dz = b.z - a.z;
         const d = Math.hypot(dx, dz);
@@ -520,8 +551,8 @@ export class World {
   // Тревога спадает сама. Пока все в укрытиях, жильцы успокаиваются быстрее.
   updateAlert(dt) {
     if (!this.nests.length) return;
-    if (!this.alarmOn && this.alert >= 100) this.script?.onAlarm();
-    this.alert = Math.max(0, this.alert - dt * (this.alarmOn ? ALERT_REST : ALERT_DECAY));
+    if (!this.alarmOn && this.alert >= 100 && !this.goalDone) this.script?.onAlarm();
+    this.alert = Math.max(0, this.alert - dt * (this.alarmOn ? ALERT_REST : this.rules.decay));
     if (this.alarmOn && this.alert <= ALERT_SAFE) this.script?.onCalm();
   }
 

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { FOOD_GOAL } from '../sim/world.js';
 
 const el = (tag, cls, parent, text) => {
   const e = document.createElement(tag);
@@ -115,6 +114,7 @@ export class Hud {
   }
 
   flash({ dim } = {}) {
+    if (this.lessFlicker) return;
     this.flashEl.getAnimations().forEach((a) => a.cancel());
     this.flashEl.animate([{ opacity: dim ? 0.22 : 0.8 }, { opacity: 0 }], { duration: dim ? 300 : 650, easing: 'ease-out' });
   }
@@ -127,8 +127,9 @@ export class Hud {
 
   update() {
     const w = this.world;
-    this.foodVal.bar.style.width = `${(w.food / FOOD_GOAL) * 100}%`;
-    this.foodVal.num.textContent = `${Math.floor(w.food)} / ${FOOD_GOAL}`;
+    const goal = w.rules.goal;
+    this.foodVal.bar.style.width = `${(w.food / goal) * 100}%`;
+    this.foodVal.num.textContent = `${Math.floor(w.food)} / ${goal}`;
     this.alertVal.bar.style.width = `${w.alert}%`;
     this.alertVal.num.textContent = `${Math.floor(w.alert)}`;
     this.alertVal.row.classList.toggle('hot', w.alert >= 75 || w.alarmOn);
@@ -139,33 +140,10 @@ export class Hud {
       total++;
       if (!s.order && !s.hidden && s.load === 0) free++;
     }
-    this.workerText.textContent = w.alarmOn ? 'Все прячутся' : `Свободно рабочих: ${free} из ${total}`;
+    const out = w.alarmOn ? w.exposedMarks().length : 0;
+    this.workerText.textContent = w.alarmOn ? (out ? `Кликай по красным меткам! Снять рабочих: ${out}` : 'Все в укрытиях') : `Свободно рабочих: ${free} из ${total}`;
     const cost = w.workerCost();
-    this.buyBtn.textContent = total >= 8 ? 'Гнездо полное' : `Вывести рабочего: ${cost} еды (Z)`;
-    this.buyBtn.disabled = total >= 8 || w.food < cost;
+    this.buyBtn.textContent = total >= w.rules.workerCap ? 'Гнездо полное' : `Вывести рабочего: ${cost} еды (Z)`;
+    this.buyBtn.disabled = total >= w.rules.workerCap || w.food < cost;
   }
-}
-
-export function showTitle(root, onStart, instant) {
-  if (instant) {
-    onStart();
-    return;
-  }
-  const t = el('div', 'title', root);
-  el('h1', '', t, 'РУКА ЦЕЛА');
-  el('p', '', t, 'Паук против человека');
-  const btn = el('button', '', t, 'Начать');
-  el('small', '', t, 'В игре есть пауки, мерцание света и насилие. Лучше играть в наушниках и в темноте.');
-  btn.addEventListener('click', () => {
-    t.innerHTML = '';
-    const a = el('div', 'line', t, 'Ташкент, 02:14.');
-    const b = el('div', 'line', t, 'Ночью каракурт чуть не укусил человека за руку.');
-    requestAnimationFrame(() => a.classList.add('on'));
-    setTimeout(() => b.classList.add('on'), 1400);
-    setTimeout(() => {
-      t.style.opacity = 0;
-      onStart();
-    }, 4200);
-    setTimeout(() => t.remove(), 5500);
-  });
 }

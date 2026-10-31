@@ -94,6 +94,13 @@ function propGeo(p) {
       return box(p.x, p.z, p.w, p.d, -0.02, 0.02, p.c, p.m);
     case 'blanket':
       return blanket(p);
+    case 'roof': {
+      const g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4);
+      g.rotateY(Math.PI / 4);
+      g.scale(p.w, p.h, p.d);
+      g.translate(p.x, p.y + p.h / 2, p.z);
+      return paint(g, p.c, MAT.PLAIN);
+    }
     case 'curtain':
       return curtain(p);
     case 'sph': {
@@ -176,7 +183,7 @@ export class Diorama {
     this.mesh.layers.enable(CAST_LAYER);
     this.group.add(this.mesh);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), worldMaterial({ color: 0x4c5a44, mat: MAT.GRASS }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), worldMaterial({ color: 0x4c5a44, mat: MAT.GRASS }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(level.worldW / 2, -0.04, level.worldD / 2);
     this.group.add(ground);
@@ -199,6 +206,22 @@ export class Diorama {
       this.bulbs.set(l.id, bulb);
     }
 
+    // Окна каждого дома отдельным объектом: при захвате они гаснут.
+    this.zones = (level.zones ?? []).map((z) => {
+      const parts = z.wins.map((b) => {
+        const g = new THREE.BoxGeometry(b.w, b.h, b.d);
+        g.translate(b.x + b.w / 2, b.y + b.h / 2, b.z);
+        g.deleteAttribute('uv');
+        return g;
+      });
+      if (!parts.length) return null;
+      const merged = mergeGeometries(parts, false);
+      for (const g of parts) g.dispose();
+      const m = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ color: new THREE.Color(3.4, 2.3, 1.1) }));
+      this.group.add(m);
+      return m;
+    });
+
     for (const c of level.clocks ?? []) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.037), new THREE.MeshBasicMaterial({ map: clockTexture(c.text), color: new THREE.Color(2.4, 2.4, 2.4) }));
       m.position.set(c.x, c.y, c.z);
@@ -206,6 +229,10 @@ export class Diorama {
       this.group.add(m);
       this.clock = m;
     }
+  }
+
+  setZone(i, on) {
+    if (this.zones?.[i]) this.zones[i].visible = on;
   }
 
   setLamp(id, on) {

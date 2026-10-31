@@ -2,7 +2,6 @@ import { dist } from '../../core/util.js';
 import { goTo, lieDown, setState, stomp, wake } from '../../sim/humans.js';
 import { FOOD_GOAL } from '../../sim/world.js';
 
-const START_WORKERS = 2;
 const ROOM_LAMPS = ['bedroom', 'hall', 'kitchen', 'bath', 'grandpa'];
 
 // Сценарий первого масштаба: вступление, сбор вкусняшек, изгнание жильцов.
@@ -17,7 +16,7 @@ export class HouseScript {
     this.lost = 0;
     world.bus.on('heroDead', () => this.onHeroDead());
     world.bus.on('spiderDead', (s) => {
-      if (s.kind === 'carrier') this.lost++;
+      if (s.kind === 'carrier' && s.world === world) this.lost++;
     });
   }
 
@@ -183,7 +182,7 @@ export class HouseScript {
     const { w, h, p } = this;
     if (this.step !== 'gather') return;
     w.alarmOn = true;
-    w.say('ТРЕВОГА! В укрытие!', { big: true, ms: 1800 });
+    w.say('ТРЕВОГА!', { big: true, ms: 1200 });
     w.bus.emit('alarm');
     w.bus.emit('shake', 0.4);
     for (const id of ROOM_LAMPS) w.setLamp(id, true);
@@ -194,10 +193,12 @@ export class HouseScript {
       m.standZ = p.plate.z + 0.85;
       m.aggressive = true;
       m.cool = 1.6;
+      // Жильцы идут прямо на рабочих, которых не успели снять.
       m.brain = (world, hm) => {
-        const s = world.rng.pick(spots);
-        hm.pause = 0.6;
-        goTo(world, hm, s.x, s.z, () => {}, 1.3);
+        const prey = world.spiders.filter((s) => s.exposed).sort((a, b) => dist(a.x, a.z, hm.x, hm.z) - dist(b.x, b.z, hm.x, hm.z))[0];
+        const s = prey ?? world.rng.pick(spots);
+        hm.pause = 0.3;
+        goTo(world, hm, s.x, s.z, () => {}, 1.5);
       };
       m.pause = 0.2;
       if (m.state === 'sleep') wake(w, m);
@@ -324,10 +325,10 @@ export class HouseScript {
     this.hatched = true;
     if (w.hero) w.hero.hidden = true;
     w.addNest(p.crack.x, p.crack.z + 0.05);
-    for (let i = 0; i < START_WORKERS; i++) w.spawn('carrier', p.crack.x - 0.7 + i * 0.22, p.crack.z + 0.55);
+    for (let i = 0; i < w.rules.startWorkers; i++) w.spawn('carrier', p.crack.x - 0.7 + i * 0.22, p.crack.z + 0.55);
     for (let r = 1; r <= 6; r++) w.revealRoom(r);
     for (const c of w.level.shelters) c.field = w.grid.flow(c.x, c.z, 'spider');
-    for (let i = 0; i < 9; i++) w.addTreat();
+    for (let i = 0; i < w.rules.treats; i++) w.addTreat();
     w.flags.resources = true;
     w.bus.emit('flags', w.flags);
     // С этого момента игрок только выбирает, за какой вкусняшкой идти.

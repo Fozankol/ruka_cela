@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Обложка: тест</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #ccc; font: 14px system-ui, sans-serif; }
+  #after { padding: 40px; display: grid; gap: 12px; justify-items: start; }
+  button { background: #1a1a20; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 8px 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="after">
+  <p id="result">Обложка ещё открыта.</p>
+  <button id="again" type="button">Показать обложку снова</button>
+</div>
+<script type="module">
+import { showTitle } from '../src/ui/title.js';
+
+function open() {
+  // Имитация загрузки ресурсов игры: 1.2 с.
+  const ready = new Promise((r) => setTimeout(r, 1200));
+  showTitle({
+    ready,
+    onStart: ({ lessFlicker }) => {
+      document.getElementById('result').textContent = 'Старт. Меньше мерцания: ' + (lessFlicker ? 'да' : 'нет');
+    },
+  });
+}
+document.getElementById('again').addEventListener('click', open);
+open();
+</script>
+</body>
+</html>

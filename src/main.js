@@ -1,68 +1,122 @@
 import './style.css';
+import { Bus } from './core/util.js';
 import { Sound } from './core/sound.js';
 import { buildHouse } from './content/levels/house.js';
+import { TOWN_LEVELS, buildTown } from './content/levels/town.js';
 import { HouseScript } from './content/story/house.js';
+import { TownScript } from './content/story/town.js';
 import { Atmosphere } from './render/Atmosphere.js';
 import { Diorama } from './render/Diorama.js';
 import { Stage } from './render/Stage.js';
 import { Units } from './render/Units.js';
 import { World } from './sim/world.js';
-import { Hud, showTitle } from './ui/hud.js';
 import { CameraInput } from './ui/camera.js';
+import { Crawlers } from './ui/crawlers.js';
+import { Hud } from './ui/hud.js';
+import { showTitle } from './ui/title.js';
 
 const params = new URLSearchParams(location.search);
 const STEP = 1 / 30;
+const ORDER = ['house', 'street', 'village', 'town'];
 window.__g = {};
 
 const stage = new Stage(document.getElementById('c'));
-const level = buildHouse();
-const world = new World(level);
-const script = new HouseScript(world);
-world.script = script;
+const bus = new Bus();
+const G = { world: null, script: null, diorama: null, units: null, atmosphere: null, index: 0, presets: {} };
+let hud = null;
+let sound = null;
+let input = null;
 
-stage.bindMap(level.grid);
-const diorama = new Diorama(level, stage.scene);
-const units = new Units(world, stage);
-const atmosphere = new Atmosphere(world, stage);
-const hud = new Hud(document.getElementById('ui'), world, stage);
-const input = new CameraInput(world, stage, hud);
+function setPresets(level) {
+  const p = level.points;
+  G.presets = {
+    crawl: { dist: 1.7, pitch: 0.3, yaw: 1.12, soft: 2.6 },
+    hand: { target: { x: p.hand.x + 0.07, z: p.hand.z + 0.1, y: 0.16 }, dist: 1.0, pitch: 0.15, yaw: 0.02, soft: 2.4 },
+    flee: { dist: 3.4, pitch: 0.62, yaw: 1.05, soft: 2.2 },
+    room: { target: { x: p.crack.x - 1.3, z: p.crack.z + 2.1 }, dist: 8.2, pitch: 1.02, yaw: 1.57, soft: 1.6 },
+    house: { target: { x: level.worldW / 2, z: level.worldD / 2 + 0.4 }, dist: 18, pitch: 1.12, yaw: 1.57, soft: 1.4 },
+  };
+  stage.setCamera({ ...G.presets.crawl, target: { x: p.start.x - 0.3, z: p.start.z - 0.3, y: 0.15 } }, true);
+  stage.rig.goal.y = 0.15;
+  stage.rig.target.y = 0.15;
+}
+
+// Сборка этапа: прошлый полностью убирается со сцены.
+function loadLevel(id) {
+  G.diorama?.dispose(stage.scene);
+  G.units?.dispose();
+  G.atmosphere?.dispose();
+  const level = id === 'house' ? buildHouse() : buildTown(TOWN_LEVELS[id]);
+  const world = new World(level, 7, bus);
+  const script = id === 'house' ? new HouseScript(world) : new TownScript(world);
+  world.script = script;
+  G.world = world;
+  G.script = script;
+  G.index = ORDER.indexOf(id);
+  stage.bindMap(level.grid);
+  stage.renderer.toneMappingExposure = id === 'house' ? 1.3 : 2.4;
+  G.diorama = new Diorama(level, stage.scene);
+  G.units = new Units(world, stage);
+  G.atmosphere = new Atmosphere(world, stage);
+  stage.rig.follow = null;
+  if (hud) hud.world = world;
+  if (sound) {
+    sound.world = world;
+    sound.script = script;
+  }
+  if (input) input.world = world;
+  Object.assign(window.__g, { world, script, units: G.units });
+  if (id === 'house') {
+    setPresets(level);
+  } else {
+    stage.setCamera({ ...level.cfg.camera, target: { x: level.worldW / 2, y: 0, z: level.worldD / 2 } }, true);
+    stage.rig.userPan = true;
+  }
+}
+
+const startId = params.get('level') ?? 'house';
+loadLevel(startId);
+
+hud = new Hud(document.getElementById('ui'), G.world, stage);
+sound = new Sound(G.world, stage, G.script);
+input = new CameraInput(G.world, stage, hud);
+const crawlers = new Crawlers();
 hud.handlers = {
-  prompt: () => script.action(),
+  prompt: () => G.script.action(),
   buy: () => {
-    const err = world.buyWorker();
+    const err = G.world.buyWorker();
     if (err) hud.notice(err);
   },
 };
 
-const p = level.points;
-const presets = {
-  crawl: { dist: 1.7, pitch: 0.3, yaw: 1.12, soft: 2.6 },
-  hand: { target: { x: p.hand.x + 0.07, z: p.hand.z + 0.1, y: 0.16 }, dist: 1.0, pitch: 0.15, yaw: 0.02, soft: 2.4 },
-  flee: { dist: 3.4, pitch: 0.62, yaw: 1.05, soft: 2.2 },
-  room: { target: { x: p.crack.x - 1.3, z: p.crack.z + 2.1 }, dist: 8.2, pitch: 1.02, yaw: 1.57, soft: 1.6 },
-  hall: { target: { x: p.wire.x - 0.4, z: p.wire.z - 0.2 }, dist: 9, pitch: 1.02, yaw: 1.57, soft: 1.4 },
-  old: { target: { x: p.grandpa.x - 1.2, z: p.grandpa.z + 1.8 }, dist: 10, pitch: 1.02, yaw: 1.57, soft: 1.4 },
-  house: { target: { x: level.worldW / 2, z: level.worldD / 2 + 0.4 }, dist: 18, pitch: 1.12, yaw: 1.57, soft: 1.4 },
-};
-
-stage.setCamera({ ...presets.crawl, target: { x: p.start.x - 0.3, z: p.start.z - 0.3, y: 0.15 } }, true);
-stage.rig.goal.y = 0.15;
-stage.rig.target.y = 0.15;
-
-world.bus.on('camera', ({ preset, follow }) => {
-  stage.setCamera(presets[preset]);
-  stage.rig.follow = follow ? () => world.hero ?? stage.rig.goal : null;
+bus.on('camera', ({ preset, follow }) => {
+  stage.setCamera(G.presets[preset]);
+  stage.rig.follow = follow ? () => G.world.hero ?? stage.rig.goal : null;
   stage.rig.userPan = !follow;
 });
-world.bus.on('shake', (v) => (stage.shake = Math.max(stage.shake, v)));
-world.bus.on('lamp', ({ id, on }) => diorama.setLamp(id, on));
-world.bus.on('blackout', () => diorama.powerOff());
-world.bus.on('levelComplete', () => {
-  world.say('Дом наш. В соседнем горит свет.', { ms: 9000 });
-  stage.setCamera({ target: { x: p.outside.x, z: p.outside.z + 8 }, dist: 46, pitch: 0.95, yaw: 1.57, soft: 0.5 });
+bus.on('shake', (v) => (stage.shake = Math.max(stage.shake, v)));
+bus.on('lamp', ({ id, on }) => G.diorama.setLamp(id, on));
+bus.on('zone', ({ index, world }) => {
+  G.diorama.setZone(index, false);
+  const z = world.level.zones[index];
+  world.seedWeb(z.x, z.z, z.r);
+  bus.emit('ripple', { x: z.x, z: z.z, power: 1, kind: 'stomp' });
 });
 
-const sound = new Sound(world, stage, script);
+// Камера поднимается, прошлый этап уходит в темноту, появляется следующий.
+bus.on('levelComplete', () => {
+  const next = ORDER[G.index + 1];
+  G.world.say(next ? 'В соседнем горит свет.' : 'Огни кончились.', { ms: 3500 });
+  stage.setCamera({ dist: stage.rig.goalDist * 1.8, soft: 0.5 });
+  if (!next) return;
+  setTimeout(() => {
+    hud.fade({ hold: 2200, text: TOWN_LEVELS[next].intro });
+    setTimeout(() => {
+      loadLevel(next);
+      G.script.start();
+    }, 900);
+  }, 3500);
+});
 
 let running = false;
 const speed = Number(params.get('speed')) || 1;
@@ -77,18 +131,20 @@ function frame(now) {
   if (running && !window.__g.paused) {
     acc += dt * speed;
     while (acc >= STEP) {
-      world.tick(STEP);
+      G.world.tick(STEP);
       acc -= STEP;
     }
   }
   input.update(dt);
   if (running && !window.__g.paused) sound.update(dt * speed);
+  crawlers.setInfection(Math.min(1, G.index * 0.22 + G.world.alert / 400));
+  crawlers.update(dt);
   stage.update(dt);
   stage.updateMap(dt);
-  units.update(dt, acc / STEP);
-  atmosphere.update();
+  G.units.update(dt, acc / STEP);
+  G.atmosphere.update();
   hud.update();
-  stage.render(world);
+  stage.render(G.world);
   frames++;
   fpsT += dt;
   if (fpsT >= 1) {
@@ -99,16 +155,22 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-const skip = params.get('skip');
-showTitle(
-  document.getElementById('ui'),
-  () => {
-    running = true;
-    if (skip) script.debugSkip(skip);
-    else script.start();
-  },
-  !!skip || params.has('notitle'),
-);
+function begin() {
+  running = true;
+  if (params.has('skip') && startId === 'house') G.script.debugSkip(params.get('skip'));
+  else G.script.start();
+}
+
+if (params.has('skip') || params.has('notitle') || startId !== 'house') begin();
+else {
+  showTitle({
+    onStart: ({ lessFlicker }) => {
+      hud.lessFlicker = lessFlicker;
+      hud.fade({ hold: 3000, text: 'Ташкент, 02:14. Ночью каракурт чуть не укусил человека за руку.' });
+      setTimeout(begin, 2600);
+    },
+  });
+}
 
 requestAnimationFrame(frame);
 
@@ -116,14 +178,14 @@ requestAnimationFrame(frame);
 function advance(seconds) {
   const n = Math.round(seconds / STEP);
   for (let i = 0; i < n; i++) {
-    world.tick(STEP);
+    G.world.tick(STEP);
     stage.update(STEP);
     stage.updateMap(STEP);
-    units.update(STEP, 1);
+    G.units.update(STEP, 1);
   }
-  atmosphere.update();
+  G.atmosphere.update();
   hud.update();
-  stage.render(world);
+  stage.render(G.world);
 }
 
-Object.assign(window.__g, { world, stage, script, units, hud, advance, sound, paused: params.has('paused') });
+Object.assign(window.__g, { stage, hud, advance, sound, G, loadLevel, paused: params.has('paused') });

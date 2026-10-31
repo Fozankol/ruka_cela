@@ -45,6 +45,9 @@ export class Units {
     this.world = world;
     this.stage = stage;
     const scene = stage.scene;
+    const raw = world.bus;
+    this.subs = [];
+    const bus = { on: (n, f) => this.subs.push(raw.on(n, f)) };
     this.scene = scene;
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -124,29 +127,37 @@ export class Units {
     this.nestMat = worldMaterial({ color: 0xc8ccd4, glow: 0.012 });
     this.nestMeshes = [];
 
-    world.bus.on('ripple', (r) => this.addRipple(r));
-    world.bus.on('slipper', (e) => this.onSlipper(e));
-    world.bus.on('human', (e) => e.event === 'cocoon' && this.addCocoon(e.h));
-    world.bus.on('nest', (n) => this.addNest(n));
-    world.bus.on('mark', (m) => this.showMark(m, false));
-    world.bus.on('order', (o) => this.showMark(o, o.attack));
+    bus.on('ripple', (r) => this.addRipple(r));
+    bus.on('slipper', (e) => this.onSlipper(e));
+    bus.on('human', (e) => e.event === 'cocoon' && this.addCocoon(e.h));
+    bus.on('nest', (n) => this.addNest(n));
+    bus.on('mark', (m) => this.showMark(m, false));
+    bus.on('order', (o) => this.showMark(o, o.attack));
     this.treatGeo = new THREE.SphereGeometry(0.075, 14, 10);
     this.treatRing = new THREE.RingGeometry(0.2, 0.235, 32);
     this.treatRing.rotateX(-Math.PI / 2);
     this.treatMeshes = new Map();
-    world.bus.on('treat', (t) => this.addTreat(t));
-    world.bus.on('treatGone', (t) => this.removeTreat(t));
+    bus.on('treat', (t) => this.addTreat(t));
+    bus.on('treatGone', (t) => this.removeTreat(t));
     this.shelterRings = world.level.shelters.map((c) => {
       const m = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 1.7, 0.7), ...additive, depthTest: false }));
       m.position.set(c.x, 0.03, c.z);
-      m.scale.setScalar(1.5);
+      m.scale.setScalar(1.5 * world.unitK);
       m.renderOrder = 6;
       m.visible = false;
       this.group.add(m);
       return m;
     });
+    this.alarmRings = Array.from({ length: 10 }, () => {
+      const m = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.25, 0.15), ...additive, depthTest: false }));
+      m.position.y = 0.04;
+      m.renderOrder = 8;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    });
     this.rigs = new Map();
-    world.bus.on('spiderDead', (s) => {
+    bus.on('spiderDead', (s) => {
       this.rigs.get(s)?.dispose();
       this.rigs.delete(s);
     });
@@ -155,6 +166,7 @@ export class Units {
   addTreat(t) {
     const g = new THREE.Group();
     g.position.set(t.x, 0, t.z);
+    g.userData.k = this.world.unitK;
     const ball = new THREE.Mesh(this.treatGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(...t.color) }));
     ball.position.y = 0.1;
     const ring = new THREE.Mesh(this.treatRing, new THREE.MeshBasicMaterial({ color: new THREE.Color(...t.color), ...additive, depthTest: false, opacity: 0.8 }));
@@ -228,7 +240,7 @@ export class Units {
     for (const s of w.spiders) {
       let rig = this.rigs.get(s);
       if (!rig) {
-        rig = new HeroSpider(this.group, SPIDERS[s.kind].scale, s.kind);
+        rig = new HeroSpider(this.group, SPIDERS[s.kind].scale * w.unitK, s.kind);
         this.rigs.set(s, rig);
       }
       rig.update(s, dt, alpha);
@@ -314,18 +326,28 @@ export class Units {
       const grow = Math.min(1, (now - m.born) / 300);
       const busy = t.worker || t.queued;
       m.ball.position.y = 0.1 + Math.sin(now * 0.004 + t.x) * 0.025;
-      m.g.scale.setScalar(grow);
+      m.g.scale.setScalar(grow * m.g.userData.k);
       m.ring.scale.setScalar(busy ? 0.75 : 1 + Math.sin(now * 0.005 + t.z) * 0.1);
       if (busy) m.ring.material.color.setRGB(0.3, 1.8, 0.7);
       else m.ring.material.color.setRGB(...t.color);
       m.ring.visible = !w.alarmOn;
     }
     for (const r of this.shelterRings) r.visible = w.alarmOn;
+    const marks = w.alarmOn ? w.exposedMarks() : [];
+    this.alarmRings.forEach((r, i) => {
+      const m = marks[i];
+      r.visible = !!m;
+      if (!m) return;
+      r.position.x = m.x;
+      r.position.z = m.z;
+      r.scale.setScalar((2.1 + Math.sin(now * 0.016) * 0.5) * w.unitK);
+    });
 
     for (const f of this.figures) f.update(dt, alpha);
   }
 
   dispose() {
+    for (const off of this.subs) off();
     this.scene.remove(this.group);
   }
 }

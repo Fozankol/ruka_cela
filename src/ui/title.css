@@ -1,0 +1,152 @@
+/* Обложка и экран загрузки. Шрифт названия: Ruslan Display (OFL-1.1), кириллический поднабор встроен ниже. */
+@font-face {
+  font-family: 'Ruslan Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('data:font/woff2;base64,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') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+.title-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: #000;
+  color: #cfcac4;
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  opacity: 1;
+  transition: opacity 1.2s ease;
+  overflow: hidden;
+}
+.title-screen.is-leaving { opacity: 0; pointer-events: none; }
+
+/* Нить, по которой из темноты медленно спускается паук. */
+.title-thread {
+  position: absolute;
+  top: 0;
+  left: 62%;
+  width: 1px;
+  height: 0;
+  background: linear-gradient(rgba(220, 215, 205, 0), rgba(220, 215, 205, 0.35));
+  animation: title-descend 14s cubic-bezier(.45, 0, .2, 1) 1.5s forwards;
+}
+.title-thread::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: -4px;
+  width: 9px;
+  height: 11px;
+  border-radius: 50% 50% 45% 45%;
+  background: #0a0707;
+  box-shadow: 0 0 0 1px rgba(200, 180, 165, 0.35);
+}
+@keyframes title-descend { to { height: 34vh; } }
+
+.title-inner {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 24px;
+  max-width: 560px;
+  text-align: center;
+}
+
+.title-name {
+  margin: 0;
+  font-family: 'Ruslan Display', Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  font-size: clamp(44px, 9vw, 104px);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: #e8e2da;
+  text-shadow: 0 0 24px rgba(150, 10, 10, 0.35);
+  animation: title-unease 9s ease-in-out infinite;
+}
+/* Неровное дыхание названия: медленно, без вспышек. */
+@keyframes title-unease {
+  0%, 100% { opacity: 1; transform: translateY(0); }
+  46% { opacity: 1; }
+  48% { opacity: 0.82; transform: translateY(0.5px); }
+  51% { opacity: 1; }
+  70% { transform: translateY(-0.5px); }
+}
+
+.title-sub {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: #c84a4a;
+}
+
+.title-start {
+  margin-top: 26px;
+  min-width: 180px;
+  padding: 12px 28px;
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #e8e2da;
+  background: transparent;
+  border: 1px solid rgba(232, 226, 218, 0.35);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color .3s, color .3s, background .3s;
+}
+.title-start:hover:not(:disabled), .title-start:focus-visible {
+  border-color: #b33;
+  color: #fff;
+  background: rgba(150, 20, 20, 0.12);
+  outline: none;
+}
+.title-start:disabled { cursor: wait; color: #6d6863; border-color: rgba(232, 226, 218, 0.15); }
+
+.title-options { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #a49e97; cursor: pointer; }
+.title-options input {
+  appearance: none;
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid rgba(232, 226, 218, 0.35);
+  border-radius: 9px;
+  position: relative;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.title-options input::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #8a847e;
+  transition: transform .2s, background .2s;
+}
+.title-options input:checked { border-color: #b33; background: rgba(150, 20, 20, 0.2); }
+.title-options input:checked::before { transform: translateX(16px); background: #e8e2da; }
+.title-options input:focus-visible { outline: 1px solid #b33; outline-offset: 3px; }
+
+.title-warning {
+  margin: 30px 0 0;
+  max-width: 420px;
+  font-size: 12.5px;
+  color: #77716b;
+}
+
+/* «Меньше мерцания» и системная настройка снимают всё движение обложки. */
+.title-screen.less-flicker .title-name,
+.title-screen.less-flicker .title-thread { animation: none; }
+.title-screen.less-flicker .title-thread { height: 34vh; }
+@media (prefers-reduced-motion: reduce) {
+  .title-name, .title-thread { animation: none; }
+  .title-thread { height: 34vh; }
+  .title-screen { transition: none; }
+}
