@@ -190,6 +190,8 @@ export class HeroSpider {
     this.yaw = 0;
     this.bob = 0;
     this.sway = 0;
+    this.vx = 0;
+    this.vz = 0;
     this.tap = 0;
     this.visible = false;
   }
@@ -239,25 +241,41 @@ export class HeroSpider {
     }
 
     // Лапы переставляются двумя группами, как у настоящих пауков.
+    this.vx = lerp(this.vx, velX, 0.25);
+    this.vz = lerp(this.vz, velZ, 0.25);
+    const speed = Math.min(1.5, Math.hypot(this.vx, this.vz));
+    const stride = S * (0.26 + speed * 0.2);
+    const stepTime = 0.1 - speed * 0.025;
+    const lead = stepTime * 1.3;
     const busy = [false, false];
     for (const leg of this.legs) if (leg.t < 1) busy[leg.group] = true;
-    const limit = S * 0.46;
     for (const leg of this.legs) {
       this.restPoint(leg, A);
-      A.x += velX * 0.07;
-      A.z += velZ * 0.07;
-      if (leg.t >= 1 && !busy[1 - leg.group] && A.distanceTo(leg.foot) > limit) {
-        leg.from.copy(leg.foot);
-        leg.to.copy(A);
-        leg.t = 0;
-        busy[leg.group] = true;
-      }
+      A.x += this.vx * lead;
+      A.z += this.vz * lead;
       if (leg.t < 1) {
-        leg.t = Math.min(1, leg.t + dt * (7 + speedNow * 9));
+        // Цель шага едет вместе с телом, поэтому лапа не отстаёт.
+        leg.to.copy(A);
+        leg.t = Math.min(1, leg.t + dt / stepTime);
         leg.foot.lerpVectors(leg.from, leg.to, leg.t);
-        leg.foot.y = Math.sin(leg.t * Math.PI) * S * 0.3;
+        leg.foot.y = Math.sin(leg.t * Math.PI) * S * 0.28;
       } else {
         leg.foot.y = 0;
+        const off = Math.hypot(A.x - leg.foot.x, A.z - leg.foot.z);
+        if (off > stride && (!busy[1 - leg.group] || off > stride * 1.6)) {
+          leg.from.copy(leg.foot);
+          leg.t = 0;
+          busy[leg.group] = true;
+        }
+      }
+      // Ступня никогда не уходит дальше длины лапы.
+      const fx = leg.foot.x - x;
+      const fz = leg.foot.z - z;
+      const fd = Math.hypot(fx, fz);
+      const maxReach = S * 1.72;
+      if (fd > maxReach) {
+        leg.foot.x = x + (fx / fd) * maxReach;
+        leg.foot.z = z + (fz / fd) * maxReach;
       }
       this.placeLeg(leg, y);
     }
@@ -267,19 +285,20 @@ export class HeroSpider {
     const S = this.S;
     const a = this.yaw + leg.ang * leg.side;
     leg.hip.set(this.pos.x + Math.cos(this.yaw) * 0.08 * S + Math.cos(a) * 0.18 * S, y + 0.02 * S, this.pos.z + Math.sin(this.yaw) * 0.08 * S + Math.sin(a) * 0.18 * S);
-    const ankle = A.set(leg.foot.x - Math.cos(a) * 0.14 * S, leg.foot.y + 0.3 * S, leg.foot.z - Math.sin(a) * 0.14 * S);
+    const ankle = new THREE.Vector3(leg.foot.x - Math.cos(a) * 0.14 * S, leg.foot.y + 0.3 * S, leg.foot.z - Math.sin(a) * 0.14 * S);
     const L1 = 0.8 * S;
     const L2 = 0.7 * S;
-    C.subVectors(ankle, leg.hip);
-    const d = Math.max(0.001, Math.min(C.length(), L1 + L2 - 0.001));
-    const dir = C.normalize().clone();
+    const dir = new THREE.Vector3().subVectors(ankle, leg.hip);
+    const full = Math.max(0.001, dir.length());
+    dir.divideScalar(full);
+    const d = Math.min(full, L1 + L2 - 0.001);
+    if (d < full) ankle.copy(leg.hip).addScaledVector(dir, d);
     const along = (L1 * L1 - L2 * L2 + d * d) / (2 * d);
     const lift = Math.sqrt(Math.max(L1 * L1 - along * along, 0));
     const side = B.copy(UP).addScaledVector(dir, -UP.dot(dir)).normalize();
     const knee = new THREE.Vector3().copy(leg.hip).addScaledVector(dir, along).addScaledVector(side, lift);
-    const ankleCopy = ankle.clone();
     place(leg.femur, leg.hip, knee);
-    place(leg.tibia, knee, ankleCopy);
-    place(leg.tarsus, ankleCopy, leg.foot);
+    place(leg.tibia, knee, ankle);
+    place(leg.tarsus, ankle, leg.foot);
   }
 }

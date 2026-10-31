@@ -310,6 +310,16 @@ export function buildHouse() {
     lump(x, 2.1, z, 0.85, 1.1, 0.85, 0x2a4432);
   }
 
+  // Карта высот для камеры: стены, мебель, одеяла и деревья.
+  const WALL_TOP = 1.2;
+  for (let i = 0; i < g.n; i++) if (g.type[i] === T.WALL) g.height[i] = WALL_TOP;
+  for (const p of props) {
+    if ((p.s === 'box' || p.s === 'rbox') && p.h > 0.03 && p.w >= 0.12 && p.d >= 0.12) g.raise(p.x, p.z, p.w, p.d, p.y + p.h);
+    else if (p.s === 'cyl' && p.r >= 0.1) g.raise(p.x - p.r, p.z - p.r, p.r * 2, p.r * 2, p.y + p.h);
+    else if (p.s === 'sph' && p.sx >= 0.2) g.raise(p.x - p.sx, p.z - p.sz, p.sx * 2, p.sz * 2, p.y + p.sy);
+    else if (p.s === 'blanket') g.raise(p.x - 0.2, p.z, p.w + 0.4, p.d + 0.2, p.y + 0.12);
+  }
+
   return {
     id: 'house',
     title: 'Дом',

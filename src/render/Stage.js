@@ -171,6 +171,7 @@ export class Stage {
       goalYaw: 1.57,
       follow: null,
       soft: 3,
+      lift: 0,
     };
     this.shake = 0;
     this.ray = new THREE.Raycaster();
@@ -293,6 +294,31 @@ export class Stage {
     this.mapTex.needsUpdate = true;
   }
 
+  // Свободен ли путь от цели до камеры при таком наклоне.
+  viewClear(pitch) {
+    const r = this.rig;
+    const g = this.grid;
+    const cp = Math.cos(pitch) * r.dist;
+    const dx = Math.cos(r.yaw) * cp;
+    const dz = Math.sin(r.yaw) * cp;
+    const dy = Math.sin(pitch) * r.dist;
+    for (let t = 0.2; t <= 1.081; t += 0.09) {
+      const h = g.height[g.at(r.target.x + dx * t, r.target.z + dz * t)];
+      if (r.target.y + dy * t < h + 0.07) return false;
+    }
+    return true;
+  }
+
+  // Камера поднимается над мебелью и стенами, а не заезжает внутрь них.
+  clearPitch() {
+    const r = this.rig;
+    if (!this.grid || r.pitch > 0.95) return 0;
+    for (let lift = 0; lift < 0.95; lift += 0.1) {
+      if (this.viewClear(r.pitch + lift)) return lift;
+    }
+    return 0.95;
+  }
+
   // Ближайшие к камере источники попадают в шейдер, первый из них отбрасывает тень.
   updateLights(world) {
     const c = this.rig.target;
@@ -372,9 +398,12 @@ export class Stage {
     r.dist = lerp(r.dist, r.goalDist, k);
     r.pitch = lerp(r.pitch, r.goalPitch, k);
     r.yaw = lerp(r.yaw, r.goalYaw, k);
-    const cp = Math.cos(r.pitch);
+    const need = this.clearPitch();
+    r.lift = lerp(r.lift, need, 1 - Math.exp(-dt * (need > r.lift ? 20 : 2.5)));
+    const pitch = r.pitch + r.lift;
+    const cp = Math.cos(pitch);
     const c = this.camera;
-    c.position.set(r.target.x + Math.cos(r.yaw) * cp * r.dist, r.target.y + Math.sin(r.pitch) * r.dist, r.target.z + Math.sin(r.yaw) * cp * r.dist);
+    c.position.set(r.target.x + Math.cos(r.yaw) * cp * r.dist, r.target.y + Math.sin(pitch) * r.dist, r.target.z + Math.sin(r.yaw) * cp * r.dist);
     this.shake = Math.max(0, this.shake - dt * 2.6);
     if (this.shake > 0) {
       const s = this.shake * this.shake * 0.05 * clamp(r.dist / 2, 0.5, 3);

@@ -17,6 +17,7 @@ export class Grid {
     this.type = new Uint8Array(n);
     this.room = new Uint8Array(n);
     this.shade = new Uint8Array(n);
+    this.height = new Float32Array(n);
     this.lightW = new Float32Array(n);
     this.lightC = new Float32Array(n);
     this.staticW = new Float32Array(n);
@@ -60,6 +61,17 @@ export class Grid {
         const i = this.idx(cx, cz);
         if (type >= 0) this.type[i] = type;
         if (room >= 0) this.room[i] = room;
+      }
+    }
+  }
+  // Высота предметов на клетке: по ней камера понимает, что впереди препятствие.
+  raise(x, z, w, d, top) {
+    const x1 = this.cx(x + w - 1e-4);
+    const z1 = this.cz(z + d - 1e-4);
+    for (let cz = this.cz(z); cz <= z1; cz++) {
+      for (let cx = this.cx(x); cx <= x1; cx++) {
+        const i = this.idx(cx, cz);
+        if (top > this.height[i]) this.height[i] = top;
       }
     }
   }
