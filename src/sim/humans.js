@@ -120,7 +120,8 @@ export function stomp(world, h, x, z) {
 }
 
 function awakeUpkeep(world, h, dt) {
-  h.venom = Math.max(0, h.venom - 0.02 * dt);
+  // В темноте человек слепнет: яд копится, а пауков он стряхивает вдвое реже.
+  h.venom = Math.max(0, h.venom - (h.torch ? 0.02 : 0.004) * dt);
   h.cool -= dt;
   if (h.torch) {
     h.torch.x = h.x;
@@ -130,7 +131,7 @@ function awakeUpkeep(world, h, dt) {
   if (h.attached > 0) {
     h.swatT -= dt;
     if (h.swatT <= 0) {
-      h.swatT = 0.8;
+      h.swatT = h.torch ? 0.8 : 1.7;
       world.swat(h);
     }
   }
