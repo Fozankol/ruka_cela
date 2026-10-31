@@ -483,3 +483,362 @@ body.aiming #c {
   background: rgba(255, 255, 255, 0.08);
   cursor: default;
 }
+
+.war {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.war button {
+  pointer-events: auto;
+}
+
+.wtop {
+  z-index: 5;
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.wdate {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--dim);
+}
+
+.wstat span,
+.wmeter span {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.wstat b {
+  font-family: var(--mono);
+  font-size: 15px;
+}
+
+.wmeter {
+  width: 130px;
+}
+
+.wmeter section {
+  height: 7px;
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.wmeter i {
+  display: block;
+  height: 100%;
+  background: #e8a93c;
+}
+
+.wmeter.dawn i {
+  background: #7fb6ff;
+}
+
+.pin {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pin i {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: #6d8fb8;
+  box-shadow: 0 0 6px rgba(120, 170, 255, 0.8);
+}
+
+.pin span {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pin:hover span,
+.pin.front span,
+.pin.sel span {
+  opacity: 1;
+}
+
+.pin.edge i {
+  inset: 6px;
+  background: #e8c04a;
+  box-shadow: 0 0 10px rgba(232, 192, 74, 0.9);
+}
+
+.pin.mine i {
+  background: #e8ecf2;
+  box-shadow: 0 0 7px rgba(255, 255, 255, 0.9);
+}
+
+.pin.nest i {
+  inset: 5px;
+  border: 2px solid var(--soki);
+}
+
+.pin.front i {
+  inset: 1px;
+  background: conic-gradient(var(--red) var(--p, 0%), rgba(255, 255, 255, 0.16) 0);
+  box-shadow: 0 0 14px rgba(224, 52, 42, 0.95);
+}
+
+.pin.sel i {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.pin.dark i {
+  filter: brightness(0.45);
+}
+
+.pin.burn i {
+  background: #ff7a2a;
+}
+
+.wside {
+  z-index: 5;
+  position: absolute;
+  top: 74px;
+  right: 14px;
+  width: 244px;
+  padding: 12px;
+  pointer-events: auto;
+}
+
+.wside h3,
+.wcard h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.wside p,
+.wcard p {
+  margin: 0 0 7px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.wside .wnote {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.wg {
+  height: 8px;
+  margin-bottom: 7px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.wg i {
+  display: block;
+  height: 100%;
+  background: var(--red);
+}
+
+.wdock {
+  z-index: 5;
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+
+.wbtn,
+.wbuy {
+  padding: 9px 13px;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wbuy {
+  font-weight: 700;
+  color: #15180b;
+  background: var(--soki);
+}
+
+.wbtn:hover:not(:disabled) {
+  border-color: #fff;
+}
+
+.wbtn.on {
+  border-color: var(--red);
+  background: rgba(224, 52, 42, 0.28);
+}
+
+.wbtn:disabled,
+.wbuy:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wbuy:disabled {
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wspeed {
+  padding: 9px 10px;
+}
+
+.wloot {
+  position: absolute;
+  padding: 4px 9px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: #15180b;
+  background: var(--soki);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  animation: pulse2 0.9s ease-in-out infinite alternate;
+}
+
+.wloot.signal {
+  color: #fff;
+  background: #3e78c8;
+}
+
+@keyframes pulse2 {
+  to {
+    transform: scale(1.14);
+  }
+}
+
+.wnuke {
+  position: absolute;
+  display: none;
+  transform: translate(-50%, -50%);
+  padding: 10px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--red);
+  border: 2px solid #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 3;
+}
+
+.wevo {
+  z-index: 6;
+  position: absolute;
+  left: 50%;
+  top: 76px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  pointer-events: auto;
+}
+
+.wcol {
+  width: 176px;
+}
+
+.wcol h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--red);
+}
+
+.wnode {
+  display: block;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.wnode b {
+  display: block;
+  font-size: 13px;
+}
+
+.wnode em {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.wnode s {
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--soki);
+}
+
+.wnode.done {
+  border-color: var(--soki);
+  background: rgba(201, 224, 106, 0.14);
+}
+
+.wnode:disabled {
+  cursor: default;
+}
+
+.wnode:disabled:not(.done) {
+  opacity: 0.55;
+}
+
+.wcard {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 380px;
+  transform: translate(-50%, -50%);
+  padding: 14px;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.wcard .wbtn {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  white-space: normal;
+  text-align: left;
+}

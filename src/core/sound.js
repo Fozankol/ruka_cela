@@ -32,6 +32,10 @@ export class Sound {
     bus.on('flyEaten', (f) => audio.play('bite', { pan: this.pan(f.x), volume: 0.25 * this.near(f.x, f.z) }));
     bus.on('levelComplete', () => audio.play('windowOpen'));
     bus.on('alarm', () => audio.play('alarm'));
+    bus.on('warCapture', () => audio.play('cocoon'));
+    bus.on('warNukeWarn', () => audio.play('alarm'));
+    bus.on('warNuke', () => audio.play('explosion'));
+    bus.on('warLost', () => audio.play('wireSnap'));
     bus.on('order', () => audio.play('uiClick'));
   }
 

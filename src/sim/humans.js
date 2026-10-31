@@ -77,7 +77,11 @@ export function dropTorch(world, h) {
 
 function step(world, h, dt) {
   h.moving = true;
-  if (!world.grid.smoothStep(h.field, h.x, h.z, 'human', STEP)) return true;
+  // Ошибка пути не значит «дошёл»: возвращаем человека на пол, и он идёт дальше.
+  if (!world.grid.smoothStep(h.field, h.x, h.z, 'human', STEP)) {
+    world.grid.snapHuman(h);
+    return false;
+  }
   const dx = STEP.x - h.x;
   const dz = STEP.z - h.z;
   const d = Math.hypot(dx, dz);

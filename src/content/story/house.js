@@ -205,6 +205,15 @@ export class HouseScript {
     }
   }
 
+  // Человек ложится только у своей кровати. Если его что-то отвлекло, он идёт снова.
+  goToBed(m) {
+    const { w } = this;
+    goTo(w, m, m.standX, m.standZ, () => {
+      if (dist(m.x, m.z, m.standX, m.standZ) < 0.6) lieDown(m);
+      else this.goToBed(m);
+    }, 1.5);
+  }
+
   onCalm() {
     const { w, h } = this;
     w.alarmOn = false;
@@ -213,7 +222,7 @@ export class HouseScript {
       m.aggressive = false;
       m.brain = null;
       m.pause = undefined;
-      goTo(w, m, m.standX, m.standZ, () => lieDown(m), 1.5);
+      this.goToBed(m);
     }
     w.regroup();
     w.say('Тихо. Можно выходить.', { ms: 2000 });

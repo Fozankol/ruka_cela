@@ -390,6 +390,7 @@ export class Stage {
   update(dt) {
     this.watchQuality(dt);
     const r = this.rig;
+    const war = this.warMode;
     if (r.follow) {
       const f = r.follow();
       r.goal.set(f.x, r.goal.y, f.z);
@@ -399,7 +400,7 @@ export class Stage {
     r.dist = lerp(r.dist, r.goalDist, k);
     r.pitch = lerp(r.pitch, r.goalPitch, k);
     r.yaw = lerp(r.yaw, r.goalYaw, k);
-    const need = this.clearPitch();
+    const need = war ? 0 : this.clearPitch();
     r.lift = lerp(r.lift, need, 1 - Math.exp(-dt * (need > r.lift ? 20 : 2.5)));
     const pitch = r.pitch + r.lift;
     const cp = Math.cos(pitch);
@@ -422,10 +423,14 @@ export class Stage {
     const u = this.dof.uniforms;
     u.uFocus.value = r.dist;
     u.uRange.value = Math.max(0.5, r.dist * 0.75);
-    u.uMax.value = this.quality < 2 ? clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016) : 0;
+    u.uMax.value = !war && this.quality < 2 ? clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016) : 0;
   }
 
   render(world) {
+    if (this.warMode) {
+      this.composer.render();
+      return;
+    }
     this.updateLights(world);
     this.shadow.render(this.keyOn && this.quality < 3 ? this.keyLight : null);
     this.composer.render();

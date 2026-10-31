@@ -9,15 +9,20 @@ import { Atmosphere } from './render/Atmosphere.js';
 import { Diorama } from './render/Diorama.js';
 import { Stage } from './render/Stage.js';
 import { Units } from './render/Units.js';
+import { WarView } from './render/WarView.js';
+import { War } from './sim/war.js';
 import { World } from './sim/world.js';
 import { CameraInput } from './ui/camera.js';
 import { Crawlers } from './ui/crawlers.js';
 import { Hud } from './ui/hud.js';
 import { showTitle } from './ui/title.js';
+import { WarHud } from './ui/warHud.js';
 
 const params = new URLSearchParams(location.search);
 const STEP = 1 / 30;
-const ORDER = ['house', 'street', 'village', 'town'];
+const ORDER = ['house', 'street', 'village', 'town', 'world'];
+const finaleModule = import.meta.glob('./ui/finale.js');
+const eventsModule = import.meta.glob('./content/war/events.js');
 window.__g = {};
 
 const stage = new Stage(document.getElementById('c'));
@@ -74,7 +79,8 @@ function loadLevel(id) {
   }
 }
 
-const startId = params.get('level') ?? 'house';
+const wantWar = params.get('level') === 'world';
+const startId = wantWar ? 'house' : params.get('level') ?? 'house';
 loadLevel(startId);
 
 hud = new Hud(document.getElementById('ui'), G.world, stage);
@@ -103,6 +109,38 @@ bus.on('zone', ({ index, world }) => {
   bus.emit('ripple', { x: z.x, z: z.z, power: 1, kind: 'stomp' });
 });
 
+// Мировая война: глобус вместо диорамы.
+function startWar() {
+  G.diorama?.dispose(stage.scene);
+  G.units?.dispose();
+  G.atmosphere?.dispose();
+  G.diorama = null;
+  G.units = null;
+  G.atmosphere = null;
+  stage.warMode = true;
+  stage.renderer.toneMappingExposure = 1.3;
+  hud.setFlags({ resources: false });
+  hud.setObjective('');
+  hud.setTip(null);
+  const war = new War({ bus });
+  G.war = war;
+  G.view = new WarView(stage, war, bus);
+  G.warHud = new WarHud(document.getElementById('ui'), war, G.view, bus, hud);
+  Object.assign(window.__g, { war, warHud: G.warHud, view: G.view });
+  eventsModule['./content/war/events.js']?.().then((m) => (war.events = [...m.EVENTS]));
+  hud.addRadio({ who: 'Лена', text: 'Говорит Лена. Они вышли за города. Кто слышит, не шевелитесь.' });
+}
+
+bus.on('warEnd', () => {
+  G.warHud.setSpeed(0);
+  hud.fade({ hold: 1800, text: 'Население Земли: 1' });
+  const load = finaleModule['./ui/finale.js'];
+  if (!load) return;
+  setTimeout(() => {
+    load().then(({ showFinale }) => showFinale({ stats: { minutes: Math.round(performance.now() / 60000), clicks: G.world?.stats.clicks ?? 0, food: 0 }, onEnd: () => {} }));
+  }, 1500);
+});
+
 // Камера поднимается, прошлый этап уходит в темноту, появляется следующий.
 bus.on('levelComplete', () => {
   const next = ORDER[G.index + 1];
@@ -110,8 +148,12 @@ bus.on('levelComplete', () => {
   stage.setCamera({ dist: stage.rig.goalDist * 1.8, soft: 0.5 });
   if (!next) return;
   setTimeout(() => {
-    hud.fade({ hold: 2200, text: TOWN_LEVELS[next].intro });
+    hud.fade({ hold: 2200, text: next === 'world' ? 'Прошли годы.' : TOWN_LEVELS[next].intro });
     setTimeout(() => {
+      if (next === 'world') {
+        startWar();
+        return;
+      }
       loadLevel(next);
       G.script.start();
     }, 900);
@@ -128,6 +170,17 @@ let fpsT = 0;
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  if (G.war) {
+    if (!window.__g.paused) G.war.tick(dt * G.warHud.speed);
+    stage.update(dt);
+    G.view.update(dt);
+    G.warHud.update();
+    crawlers.setInfection(Math.min(1, 0.7 + G.war.tension / 330));
+    crawlers.update(dt);
+    stage.render(G.world);
+    requestAnimationFrame(frame);
+    return;
+  }
   if (running && !window.__g.paused) {
     acc += dt * speed;
     while (acc >= STEP) {
@@ -161,7 +214,8 @@ function begin() {
   else G.script.start();
 }
 
-if (params.has('skip') || params.has('notitle') || startId !== 'house') begin();
+if (wantWar) startWar();
+else if (params.has('skip') || params.has('notitle') || startId !== 'house') begin();
 else {
   showTitle({
     onStart: ({ lessFlicker }) => {
@@ -188,4 +242,4 @@ function advance(seconds) {
   stage.render(G.world);
 }
 
-Object.assign(window.__g, { stage, hud, advance, sound, G, loadLevel, paused: params.has('paused') });
+Object.assign(window.__g, { stage, hud, advance, sound, G, loadLevel, startWar, paused: params.has('paused') });

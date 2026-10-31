@@ -121,6 +121,10 @@ export class CameraInput {
   }
 
   update(dt) {
+    if (this.stage.warMode) {
+      this.hud.setTip(null);
+      return;
+    }
     const r = this.stage.rig;
     if (r.userPan) {
       const v = r.dist * 0.85 * dt;

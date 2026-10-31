@@ -90,7 +90,7 @@ void main(){
 }`;
 
 const EARTH_FS = /* glsl */ `
-uniform sampler2D uMap; uniform float uSilk; uniform float uTime; uniform vec3 uLight;
+uniform sampler2D uMap; uniform sampler2D uTerr; uniform float uSilk; uniform float uTime; uniform vec3 uLight;
 varying vec2 vUv; varying vec3 vObj; varying vec3 vN; varying vec3 vV;
 ${NOISE}
 float fiber(vec3 p, vec3 d, float freq, float warp){
@@ -119,6 +119,9 @@ void main(){
   // Шёлк: покрытие пятнами растёт с uSilk, волокна в трёх направлениях.
   float spread = fbm(vObj * 1.7 + 3.0);
   float cover = smoothstep(spread - 0.08, spread + 0.08, uSilk * 1.3 - 0.15);
+  // Захваченная земля: шёлк лежит только там, где нарисована территория.
+  float terr = texture2D(uTerr, vUv).r;
+  cover = max(cover, smoothstep(0.32, 0.7, terr + (spread - 0.5) * 0.5) * (0.35 + 0.65 * land));
   float warp = fbm(vObj * 4.0) * 5.0;
   float f = fiber(vObj, normalize(vec3(0.8, 0.3, 0.5)), 70.0, warp)
           + fiber(vObj, normalize(vec3(-0.2, 0.9, 0.4)), 55.0, warp * 1.3)
@@ -215,6 +218,7 @@ export class Globe {
       fragmentShader: EARTH_FS,
       uniforms: {
         uMap: { value: this.landTex },
+        uTerr: { value: this.makeTerritory() },
         uSilk: { value: 0 },
         uTime: { value: 0 },
         uLight: { value: new THREE.Vector3(-0.6, 0.35, 0.75).normalize() },
@@ -257,6 +261,51 @@ export class Globe {
     this.planet.add(this.cities);
 
     this.threads = [];
+  }
+
+  makeTerritory() {
+    const cv = document.createElement('canvas');
+    cv.width = 1024;
+    cv.height = 512;
+    this.terrCtx = cv.getContext('2d');
+    this.terrCtx.fillRect(0, 0, 1024, 512);
+    this.terrTex = new THREE.CanvasTexture(cv);
+    this.terrTex.wrapS = THREE.RepeatWrapping;
+    this.terrTex.generateMipmaps = false;
+    this.terrTex.minFilter = THREE.LinearFilter;
+    return this.terrTex;
+  }
+
+  /** Рисует захваченные регионы: мягкие пятна вокруг центра и городов. */
+  paintTerritory(regions) {
+    const x = this.terrCtx;
+    x.globalCompositeOperation = 'source-over';
+    x.fillStyle = '#000';
+    x.fillRect(0, 0, 1024, 512);
+    x.globalCompositeOperation = 'lighter';
+    const blob = (lat, lon, deg) => {
+      const px = ((lon + 180) / 360) * 1024;
+      const py = ((90 - lat) / 180) * 512;
+      const r = (deg / 360) * 1024;
+      const w = 1 / Math.max(0.3, Math.cos(lat * DEG));
+      x.save();
+      x.translate(px, py);
+      x.scale(w, 1);
+      const g = x.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, 'rgba(255,0,0,0.9)');
+      g.addColorStop(0.6, 'rgba(255,0,0,0.6)');
+      g.addColorStop(1, 'rgba(255,0,0,0)');
+      x.fillStyle = g;
+      x.beginPath();
+      x.arc(0, 0, r, 0, Math.PI * 2);
+      x.fill();
+      x.restore();
+    };
+    for (const r of regions) {
+      blob(r.lat, r.lon, 11);
+      for (const c of r.cities) blob(c.lat, c.lon, 7);
+    }
+    this.terrTex.needsUpdate = true;
   }
 
   /** Яркость огней города, 0..1. Меняется плавно в update(). */

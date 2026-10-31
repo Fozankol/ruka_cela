@@ -136,6 +136,15 @@ export class Grid {
     return -1;
   }
 
+  // То же для человека: случайно зашедшего на мебель возвращаем на пол.
+  snapHuman(o) {
+    const i = this.nearestOk(o.x, o.z, HUMAN_OK);
+    if (i < 0) return;
+    const cx = i % this.w;
+    o.x = this.wx(cx);
+    o.z = this.wz((i - cx) / this.w);
+  }
+
   // Возвращает застрявшего в стене паука на ближайшую проходимую клетку.
   snapSpider(o) {
     const i = this.nearestOk(o.x, o.z, SPIDER_OK);
