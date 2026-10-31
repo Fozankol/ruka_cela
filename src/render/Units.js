@@ -130,22 +130,6 @@ export class Units {
     world.bus.on('nest', (n) => this.addNest(n));
     world.bus.on('mark', (m) => this.showMark(m, false));
     world.bus.on('order', (o) => this.showMark(o, o.attack));
-
-    const ringGeo = new THREE.RingGeometry(0.9, 1, 30);
-    ringGeo.rotateX(-Math.PI / 2);
-    // Кольца рисуются поверх всего, поэтому не прячутся под ковёр.
-    this.rings = new THREE.InstancedMesh(ringGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.85, 0.36), ...additive, depthTest: false }), 64);
-    this.rings.frustumCulled = false;
-    this.rings.count = 0;
-    this.rings.renderOrder = 6;
-    this.group.add(this.rings);
-    this.selection = null;
-    this.hover = null;
-    this.hoverRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, ...additive, depthTest: false }));
-    this.hoverRing.position.y = 0.02;
-    this.hoverRing.renderOrder = 7;
-    this.hoverRing.visible = false;
-    this.group.add(this.hoverRing);
     this.rigs = new Map();
     world.bus.on('spiderDead', (s) => {
       this.rigs.get(s)?.dispose();
@@ -283,35 +267,12 @@ export class Units {
     fp.needsUpdate = true;
 
     for (const { m, nest } of this.nestMeshes) {
-      const k = 0.35 + nest.built * 0.65;
+      const k = 0.7 + (w.levels.room ?? 0) * 0.16;
       const beat = nest.queue.length ? 1 + Math.sin(performance.now() * 0.006) * 0.05 : 1;
       m.scale.set(0.2 * k * beat, 0.11 * k * beat, 0.16 * k * beat);
     }
 
-    let rn = 0;
-    for (const s of this.selection ?? []) {
-      if (rn >= 64 || s.hidden) continue;
-      d.position.set(lerp(s.px, s.x, alpha), s.y + 0.012, lerp(s.pz, s.z, alpha));
-      d.rotation.set(0, 0, 0);
-      d.scale.setScalar(SPIDERS[s.kind].scale * 1.75);
-      d.updateMatrix();
-      this.rings.setMatrixAt(rn++, d.matrix);
-    }
-    this.rings.count = rn;
-    this.rings.instanceMatrix.needsUpdate = true;
-
     for (const f of this.figures) f.update(dt, alpha);
-
-    const hv = this.hover;
-    const show = hv?.pos && hv.type !== 'unit';
-    this.hoverRing.visible = !!show;
-    if (show) {
-      const k = 1 + Math.sin(performance.now() * 0.008) * 0.06;
-      this.hoverRing.position.x = hv.pos.x;
-      this.hoverRing.position.z = hv.pos.z;
-      this.hoverRing.scale.setScalar((hv.type === 'attack' ? 0.5 : 0.36) * k);
-      this.hoverRing.material.color.setRGB(hv.danger ? 2.4 : 1.1, hv.danger ? 0.3 : 1.4, hv.danger ? 0.2 : 1);
-    }
   }
 
   dispose() {

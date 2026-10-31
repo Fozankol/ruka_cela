@@ -1,16 +1,14 @@
 import { Bus, RNG, angleLerp, clamp, dist } from '../core/util.js';
+import { UPGRADES, upgradeCost } from '../content/upgrades.js';
 import { bakeStaticLight, composeLight } from './light.js';
 import { makeHuman, tickHuman } from './humans.js';
 
 export const SPIDERS = {
   hero: { name: 'Мать', speed: 1.25, scale: 0.17, hp: 8, bite: 4, supply: 0 },
-  fighter: { name: 'Боец', speed: 1.05, scale: 0.115, hp: 3, bite: 3, supply: 1, cost: 10, time: 5, desc: 'Кусает людей, грызёт провода. Только по приказу' },
-  carrier: { name: 'Носильщик', speed: 0.95, scale: 0.085, hp: 2, bite: 0, supply: 1, cost: 5, time: 3, desc: 'Сам носит еду в гнездо. Его надо беречь' },
+  fighter: { name: 'Боец', speed: 1.05, scale: 0.115, hp: 3, bite: 3, supply: 1, cost: 12, grow: 1.13, time: 5, desc: 'Ждёт нападения, потом кусает сам' },
+  carrier: { name: 'Носильщик', speed: 0.95, scale: 0.085, hp: 2, bite: 0, supply: 1, cost: 5, grow: 1.16, time: 3, desc: 'Сам носит еду в гнездо' },
 };
 
-export const SWARM_CAP = 8;
-const FLY_SOKI = 3;
-const COCOON_LOAD = 6;
 const HEAL_RADIUS = 1.1;
 const STEP = { x: 0, z: 0 };
 
@@ -26,7 +24,13 @@ export class World {
     this.biteRate = 0.028;
     this.spiders = [];
     this.flies = [];
-    this.food = null;
+    this.foods = [];
+    this.mods = { carry: 0, cap: 8, birth: 1, speed: 1, quiet: 1, bite: 0, hp: 0 };
+    this.levels = {};
+    this.suspicion = 0;
+    this.income = 0;
+    this.incomeT = 0;
+    this.incomeSum = 0;
     this.nests = [];
     this.cocoons = [];
     this.webList = [];
@@ -119,7 +123,8 @@ export class World {
       y: 0,
       vx: 0,
       vz: 0,
-      hp: def.hp,
+      hp: def.hp + (kind === 'fighter' ? this.mods.hp : 0),
+      maxHp: def.hp + (kind === 'fighter' ? this.mods.hp : 0),
       dir: this.rng.range(-3.14, 3.14),
       order: null,
       on: null,
@@ -160,20 +165,69 @@ export class World {
   }
 
   supplyCap() {
-    return this.nests.length ? SWARM_CAP : 0;
+    return this.nests.length ? this.mods.cap : 0;
   }
 
-  // Заказ на рождение: соки списываются сразу, паук выходит из гнезда.
+  // Цена растёт с каждым пауком этого вида.
+  unitCost(kind) {
+    const def = SPIDERS[kind];
+    let owned = this.count(kind);
+    for (const n of this.nests) for (const q of n.queue) if (q.kind === kind) owned++;
+    return Math.round(def.cost * def.grow ** owned);
+  }
+
   train(kind) {
     const def = SPIDERS[kind];
-    if (!def?.cost) return 'Этого паука нельзя вывести';
-    if (this.res.soki < def.cost) return 'Не хватает соков';
+    const cost = this.unitCost(kind);
+    if (this.res.soki < cost) return 'Не хватает соков';
     if (this.supplyUsed() + def.supply > this.supplyCap()) return 'В гнезде нет места';
     const n = this.nests[0];
     if (!n) return 'Нет гнезда';
-    this.res.soki -= def.cost;
-    n.queue.push({ kind, left: def.time, total: def.time });
+    this.res.soki -= cost;
+    const time = def.time * this.mods.birth;
+    n.queue.push({ kind, left: time, total: time });
+    this.raiseSuspicion(0.4);
     return null;
+  }
+
+  buyUpgrade(id) {
+    const u = UPGRADES.find((x) => x.id === id);
+    const level = this.levels[id] ?? 0;
+    if (!u || level >= u.max) return 'Максимум';
+    const cost = upgradeCost(u, level);
+    if (this.res.soki < cost) return 'Не хватает соков';
+    this.res.soki -= cost;
+    this.levels[id] = level + 1;
+    u.apply(this.mods, this);
+    const n = this.nests[0];
+    if (n) this.seedWeb(n.x, n.z, 3 + Object.values(this.levels).reduce((a, b) => a + b, 0));
+    this.bus.emit('upgrade', id);
+    return null;
+  }
+
+  raiseSuspicion(v) {
+    this.suspicion = clamp(this.suspicion + v * this.mods.quiet, 0, 100);
+  }
+
+  addFood(def) {
+    const food = { open: true, stock: def.max ?? 0, ...def, field: this.grid.flow(def.x, def.z, 'spider') };
+    this.foods.push(food);
+    return food;
+  }
+
+  // Открывает следующий закрытый источник еды.
+  openFood() {
+    const f = this.foods.find((x) => !x.open);
+    if (!f) return;
+    f.open = true;
+    this.revealRoom(f.room);
+    this.bus.emit('notice', 'Открыто: ' + f.name);
+  }
+
+  strength() {
+    let v = 0;
+    for (const s of this.spiders) if (s.kind === 'fighter') v += SPIDERS.fighter.bite + this.mods.bite;
+    return v;
   }
 
   addNest(x, z) {
@@ -211,26 +265,16 @@ export class World {
       }
       // В гнезде раны затягиваются: раненых выгодно отводить домой.
       for (const s of this.spiders) {
-        const max = SPIDERS[s.kind].hp;
-        if (s.hp < max && dist(s.x, s.z, n.x, n.z) < HEAL_RADIUS) s.hp = Math.min(max, s.hp + dt * 0.4);
+        if (s.hp < s.maxHp && dist(s.x, s.z, n.x, n.z) < HEAL_RADIUS) s.hp = Math.min(s.maxHp, s.hp + dt * 0.4);
       }
     }
-    // Даже после полного разгрома рой не исчезает: кладка понемногу даёт носильщика даром.
-    if (this.rts && this.nests.length && this.count('carrier') === 0 && this.res.soki < SPIDERS.carrier.cost) {
+    // Без носильщиков экономика встала бы навсегда: кладка понемногу даёт одного даром.
+    if (this.rts && this.nests.length && this.count('carrier') === 0 && this.res.soki < this.unitCost('carrier')) {
       this.freeT += dt;
       if (this.freeT > 12) {
         this.freeT = 0;
         const n = this.nests[0];
         this.spawn('carrier', n.x - 0.3, n.z + 0.35);
-      }
-    }
-    if (this.rts && !this.hero && this.nests.length) {
-      this.heroT = (this.heroT ?? 25) - dt;
-      if (this.heroT <= 0) {
-        this.heroT = 25;
-        const n = this.nests[0];
-        this.spawn('hero', n.x - 0.3, n.z + 0.35);
-        this.bus.emit('radio', { who: 'Рой', text: 'Новая мать выбралась из кокона.' });
       }
     }
   }
@@ -315,45 +359,6 @@ export class World {
     return d < 0.06;
   }
 
-  // Точка в кольцах вокруг цели, чтобы группа вставала рядом, а не в одну кучу.
-  slot(x, z, i) {
-    const a = i * 2.4;
-    const r = 0.17 * Math.sqrt(i);
-    const px = x + Math.cos(a) * r;
-    const pz = z + Math.sin(a) * r;
-    return this.grid.spiderOk(this.grid.at(px, pz)) ? { x: px, z: pz } : { x, z };
-  }
-
-  // Единая точка входа для всех приказов игрока.
-  command(list, cmd) {
-    const units = list.filter((s) => this.spiders.includes(s));
-    if (!units.length) return;
-    const field = cmd.x !== undefined ? this.grid.flow(cmd.x, cmd.z, 'spider') : null;
-    units.forEach((s, i) => {
-      if (s.on) this.detach(s);
-      this.releaseFly(s);
-      const fights = SPIDERS[s.kind].bite > 0;
-      switch (cmd.type) {
-        case 'move': {
-          const p = this.slot(cmd.x, cmd.z, i);
-          s.order = { type: 'move', x: p.x, z: p.z, field };
-          break;
-        }
-        case 'attack':
-          if (fights) s.order = { type: 'attack', h: cmd.h };
-          break;
-        case 'gnaw':
-          if (fights) s.order = { type: 'gnaw' };
-          break;
-        case 'gather':
-          if (s.kind === 'carrier') s.order = { type: 'gather', src: cmd.src, c: cmd.c, phase: s.load > 0 ? 'back' : 'go', fly: null };
-          break;
-        default:
-          break;
-      }
-    });
-  }
-
   huntField(h) {
     let c = this.hunt.get(h);
     if (!c || this.t - c.t > 0.5) {
@@ -383,48 +388,48 @@ export class World {
       this.stepAttached(s, dt);
       return;
     }
+    const speed = def.speed * this.mods.speed;
     if (!s.order && s.kind === 'carrier') this.autoWork(s, dt);
     const o = s.order;
     if (!o) return;
-    if (o.type === 'move') this.stepMove(s, o, def, dt);
-    else if (o.type === 'attack') this.stepAttack(s, o, def, dt);
-    else if (o.type === 'gnaw') this.stepGnaw(s, def, dt);
-    else if (o.type === 'gather') this.stepGather(s, o, def, dt);
+    if (o.type === 'move') this.stepMove(s, o, speed, dt);
+    else if (o.type === 'attack') this.stepAttack(s, o, speed, dt);
+    else if (o.type === 'gnaw') this.stepGnaw(s, speed, dt);
+    else if (o.type === 'gather') this.stepGather(s, o, speed, dt);
   }
 
-  // Носильщик без приказа сам идёт за самой выгодной едой.
+  // К еде рядом с человеком с фонарём носильщики не суются.
+  foodSafe(f) {
+    for (const h of this.humans) if (h.torch && dist(h.x, h.z, f.x, f.z) < 2.2) return false;
+    return true;
+  }
+
+  // Носильщик сам выбирает самую выгодную еду с учётом дороги.
   autoWork(s, dt) {
     s.restT -= dt;
     if (s.restT > 0) return;
-    if (s.load > 0) {
-      s.order = { type: 'gather', src: 'flies', phase: 'back', fly: null };
-      return;
-    }
     let best = null;
-    let bestD = Infinity;
-    for (const c of this.cocoons) {
-      const d = dist(s.x, s.z, c.x, c.z);
-      if (c.left > 0 && d < bestD) {
-        bestD = d;
-        best = c;
+    let bestV = 0;
+    for (const f of this.foods) {
+      if (!f.open || f.stock <= 0 || !this.foodSafe(f)) continue;
+      const v = f.value / (2 + dist(s.x, s.z, f.x, f.z));
+      if (v > bestV) {
+        bestV = v;
+        best = f;
       }
     }
-    if (best) s.order = { type: 'gather', src: 'cocoon', c: best, phase: 'go', fly: null };
-    else if (this.food && this.flies.length) s.order = { type: 'gather', src: 'flies', phase: 'go', fly: null };
+    if (best) s.order = { type: 'gather', food: best, phase: 'go' };
   }
 
-  stepMove(s, o, def, dt) {
+  stepMove(s, o, speed, dt) {
     if (dist(s.x, s.z, o.x, o.z) < 0.5) {
-      if (this.steer(s, o.x, o.z, def.speed, dt)) {
-        s.order = null;
-        s.restT = 6;
-      }
+      if (this.steer(s, o.x, o.z, speed, dt)) s.order = null;
       return;
     }
-    this.followField(s, o.field, def.speed, dt);
+    this.followField(s, o.field, speed, dt);
   }
 
-  stepAttack(s, o, def, dt) {
+  stepAttack(s, o, speed, dt) {
     const h = o.h;
     if (!this.canBite(h)) {
       s.order = null;
@@ -434,25 +439,26 @@ export class World {
       s.on = h;
       s.order = null;
       s.ang = this.rng.range(0, 6.28);
-      h.attached += def.bite;
+      s.biteNow = SPIDERS[s.kind].bite + this.mods.bite;
+      h.attached += s.biteNow;
       this.stats.bites++;
       this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.5, kind: 'bite' });
       return;
     }
-    this.followField(s, this.huntField(h), def.speed, dt);
+    this.followField(s, this.huntField(h), speed, dt);
   }
 
-  stepGnaw(s, def, dt) {
+  stepGnaw(s, speed, dt) {
     const w = this.wire;
     if (!w || w.done) {
       s.order = null;
       return;
     }
     if (dist(s.x, s.z, w.x, w.z) > 0.42) {
-      this.followField(s, w.field, def.speed, dt);
+      this.followField(s, w.field, speed, dt);
       return;
     }
-    this.steer(s, w.x + Math.cos(s.ang) * 0.24, w.z + Math.sin(s.ang) * 0.14, def.speed, dt);
+    this.steer(s, w.x + Math.cos(s.ang) * 0.24, w.z + Math.sin(s.ang) * 0.14, speed, dt);
     w.progress += dt * w.rate;
     w.chew = (w.chew ?? 0) - dt;
     if (w.chew <= 0) {
@@ -461,8 +467,8 @@ export class World {
     }
   }
 
-  // Носильщик ходит между едой и гнездом, пока его не отзовут.
-  stepGather(s, o, def, dt) {
+  // Носильщик ходит между едой и гнездом сам.
+  stepGather(s, o, speed, dt) {
     if (o.phase === 'back') {
       const n = this.nearestNest(s);
       if (!n) {
@@ -472,70 +478,32 @@ export class World {
       if (dist(s.x, s.z, n.x, n.z) < 0.42) {
         this.res.soki += s.load;
         this.stats.gathered += s.load;
+        this.incomeSum += s.load;
+        this.raiseSuspicion(0.2);
+        this.bus.emit('deposit', { x: s.x, z: s.z, v: s.load });
+        this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.25, kind: 'hatch' });
         s.load = 0;
         s.order = null;
         s.restT = 0;
-        this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.25, kind: 'hatch' });
         return;
       }
-      this.followField(s, n.field, def.speed * 0.85, dt);
+      this.followField(s, n.field, speed * 0.85, dt);
       return;
     }
-    if (o.src === 'cocoon') {
-      const c = o.c;
-      if (c.left <= 0) {
-        s.order = null;
-        return;
-      }
-      if (dist(s.x, s.z, c.x, c.z) < 0.6) {
-        const v = Math.min(COCOON_LOAD, c.left);
-        c.left -= v;
-        s.load = v;
-        o.phase = 'back';
-        return;
-      }
-      this.followField(s, c.field, def.speed, dt);
-      return;
-    }
-    if (o.fly && !this.flies.includes(o.fly)) o.fly = null;
-    if (!o.fly) {
-      let best = null;
-      let bestD = Infinity;
-      for (const f of this.flies) {
-        if (f.taken) continue;
-        const d = dist(s.x, s.z, f.x, f.z);
-        if (d < bestD) {
-          bestD = d;
-          best = f;
-        }
-      }
-      if (best) {
-        best.taken = true;
-        o.fly = best;
-      }
-    }
-    if (!this.food) {
+    const f = o.food;
+    if (f.stock <= 0 || !this.foodSafe(f)) {
       s.order = null;
+      s.restT = 1;
       return;
     }
-    const near = dist(s.x, s.z, this.food.x, this.food.z) < 1.0;
-    if (o.fly && near) {
-      if (this.steer(s, o.fly.x, o.fly.z, def.speed, dt) || dist(s.x, s.z, o.fly.x, o.fly.z) < 0.12) {
-        this.flies = this.flies.filter((f) => f !== o.fly);
-        this.stats.flies++;
-        this.bus.emit('ripple', { x: o.fly.x, z: o.fly.z, power: 0.35, kind: 'bite' });
-        this.bus.emit('flyEaten', o.fly);
-        o.fly = null;
-        s.load = FLY_SOKI;
-        o.phase = 'back';
-      }
-    } else if (!near) {
-      this.followField(s, this.food.field, def.speed, dt);
+    if (dist(s.x, s.z, f.x, f.z) < 0.5) {
+      f.stock -= 1;
+      s.load = f.value + this.mods.carry;
+      o.phase = 'back';
+      this.bus.emit('ripple', { x: f.x, z: f.z, power: 0.3, kind: 'bite' });
+      return;
     }
-  }
-
-  releaseFly(s) {
-    if (s.order?.fly) s.order.fly.taken = false;
+    this.followField(s, f.field, speed, dt);
   }
 
   stepAttached(s, dt) {
@@ -561,7 +529,7 @@ export class World {
   }
 
   detach(s) {
-    if (s.on) s.on.attached = Math.max(0, s.on.attached - SPIDERS[s.kind].bite);
+    if (s.on) s.on.attached = Math.max(0, s.on.attached - (s.biteNow ?? 0));
     s.on = null;
     s.y = 0;
     if (!this.grid.spiderOk(this.grid.at(s.x, s.z))) this.grid.snapSpider(s);
@@ -577,11 +545,13 @@ export class World {
 
   killSpider(s) {
     if (s.on) this.detach(s);
-    this.releaseFly(s);
     this.spiders = this.spiders.filter((o) => o !== s);
     this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.4, kind: 'death' });
     this.bus.emit('spiderDead', s);
-    if (s.kind === 'carrier') this.bus.emit('notice', 'Носильщика раздавили!');
+    if (s.kind === 'carrier') {
+      this.bus.emit('notice', 'Носильщика раздавили!');
+      this.raiseSuspicion(3);
+    }
     if (s === this.hero) {
       this.hero = null;
       this.bus.emit('heroDead');
@@ -615,8 +585,8 @@ export class World {
 
   onCocoon(h) {
     const lying = h.lie > 0.5;
-    const c = { x: h.x, z: lying ? h.z - h.height * 0.46 : h.z, lie: lying, h, left: 36 };
-    c.field = this.grid.flow(c.x, c.z, 'spider');
+    const c = this.addFood({ x: h.x, z: lying ? h.z - h.height * 0.46 : h.z, value: 6, stock: 8, regen: 0, name: 'Кокон', cocoon: true });
+    c.h = h;
     this.cocoons.push(c);
     this.level.population -= 1;
     this.dread = (this.dread ?? 0) + 0.12;
@@ -626,17 +596,37 @@ export class World {
     this.script?.onCocoon?.(h);
   }
 
-  updateFlies(dt) {
-    for (const f of this.flies) {
-      f.a += dt * f.w;
-      f.x = f.cx + Math.cos(f.a) * f.r;
-      f.z = f.cz + Math.sin(f.a * 1.3) * f.r;
-      f.y = 0.1 + Math.abs(Math.sin(f.a * 2.1)) * 0.35;
+  // Источники пополняются, мухи вокруг них показывают, что там есть еда.
+  updateFoods(dt) {
+    for (const f of this.foods) {
+      if (!f.open || !f.regen) continue;
+      f.stock = Math.min(f.max, f.stock + f.regen * dt);
+      if (!f.bugs) continue;
+      const want = Math.min(6, Math.floor(f.stock));
+      let have = 0;
+      for (const b of this.flies) if (b.food === f) have++;
+      if (have < want) this.addFly(f);
+      else if (have > want) this.flies.splice(this.flies.findIndex((b) => b.food === f), 1);
     }
+    for (const b of this.flies) {
+      b.a += dt * b.w;
+      b.x = b.cx + Math.cos(b.a) * b.r;
+      b.z = b.cz + Math.sin(b.a * 1.3) * b.r;
+      b.y = 0.1 + Math.abs(Math.sin(b.a * 2.1)) * 0.35;
+    }
+    this.incomeT += dt;
+    if (this.incomeT >= 5) {
+      this.income = this.incomeSum / this.incomeT;
+      this.incomeT = 0;
+      this.incomeSum = 0;
+    }
+    this.suspicion = Math.max(0, this.suspicion - dt * 0.15);
   }
 
-  addFly(cx, cz) {
-    this.flies.push({ cx, cz, x: cx, z: cz, y: 0.2, a: this.rng.range(0, 6), r: this.rng.range(0.1, 0.42), w: this.rng.range(1.6, 3), taken: false });
+  addFly(food) {
+    const cx = food.x + this.rng.range(-0.25, 0.25);
+    const cz = food.z + this.rng.range(-0.25, 0.25);
+    this.flies.push({ food, cx, cz, x: cx, z: cz, y: 0.2, a: this.rng.range(0, 6), r: this.rng.range(0.1, 0.42), w: this.rng.range(1.6, 3) });
   }
 
   // Паутина сама понемногу разрастается от гнезда.
@@ -726,7 +716,7 @@ export class World {
     for (const s of [...this.spiders]) this.stepSpider(s, dt);
     this.separate(dt);
     for (const h of this.humans) tickHuman(this, h, dt);
-    this.updateFlies(dt);
+    this.updateFoods(dt);
     this.updateWeb(dt);
     this.updateNests(dt);
     if (this.wire && !this.wire.done && this.wire.progress >= 1) this.wire.done = true;

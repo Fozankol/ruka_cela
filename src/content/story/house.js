@@ -1,6 +1,10 @@
 import { dist } from '../../core/util.js';
 import { dropTorch, giveTorch, goTo, lieDown, setState, stomp, wake } from '../../sim/humans.js';
 
+const QUIET_TIME = 300;
+const WAVE = 3;
+const PATROL_LINES = ['Опять что-то шуршит. Пойду гляну.', 'Не спится. Проверю кухню.', 'Ты слышал? Там кто-то ходит.'];
+
 // Сценарий первого масштаба. Каждый шаг включает цель и проверяет своё условие.
 export class HouseScript {
   constructor(world) {
@@ -104,16 +108,15 @@ export class HouseScript {
       w.setObjective('');
       w.bus.emit('fade', { hold: 2400, text: 'Третья ночь.' });
     },
-    swarm: () => {
+    quiet: () => {
       const { w } = this;
-      w.setObjective('Носильщики сами таскают мух в гнездо, это твои соки. Береги их.');
-      w.bus.emit('radio', { who: 'Рой', text: 'Светлые носят еду. Чёрные с красным кусают.' });
-    },
-    breed: () => {
-      const { w } = this;
+      this.quietLeft = QUIET_TIME;
+      this.patrolT = 55;
+      w.quietLeft = QUIET_TIME;
       w.flags.swarmBar = true;
       w.bus.emit('flags', w.flags);
-      w.setObjective('Выведи ещё двух бойцов: кнопка справа внизу или клавиша Z. Нужно 4 бойца.');
+      w.setObjective('Рой растёт втихаря. Носильщики сами таскают еду, ты тратишь соки на пауков и гнездо. Когда бойцов хватит, нападай.');
+      w.bus.emit('radio', { who: 'Рой', text: 'Светлые носят еду. Чёрные ждут сигнала.' });
     },
     wire: () => {
       const { w, p } = this;
@@ -121,7 +124,10 @@ export class HouseScript {
       this.wireShown = -1;
       w.setBeacon(p.wire);
       w.revealRoom(4);
-      w.setObjective('Люди живут светом. Выбери бойцов и кликни по щитку в коридоре.');
+      w.assaultOn = true;
+      w.quietLeft = 0;
+      w.say('Нападение.', { big: true, ms: 2200 });
+      w.setObjective('Бойцы идут к щитку. Без света люди ослепнут. Подкрепляй рой, он сам идёт в бой.');
       this.cam('hall');
     },
     dark: () => {
@@ -132,11 +138,7 @@ export class HouseScript {
       w.setBeacon(null);
       w.setObjective('');
       w.say('Щелчок. Дом ослеп.', { ms: 3000 });
-      for (const id of ['father', 'mother']) {
-        h[id].standX = id === 'father' ? this.p.hand.x + 0.4 : h[id].x - 0.2 + 1.6;
-        h[id].standZ = this.p.hand.z + 0.7;
-      }
-      wake(w, h.father, () => {
+      this.rouse(h.father, () => {
         giveTorch(w, h.father);
         goTo(w, h.father, this.p.wire.x - 0.5, this.p.wire.z + 0.3, () => {
           h.father.pause = 6;
@@ -148,7 +150,7 @@ export class HouseScript {
       h.grandpa.huntable = true;
       w.revealRoom(3);
       w.setBeacon(p.grandpa);
-      w.setObjective('Старик в дальней комнате не слышит. Кликни по нему: бойцы нападут.');
+      w.setObjective('Рой идёт на старика в дальней комнате. Он не слышит.');
       this.cam('old');
     },
     hunt: () => {
@@ -160,7 +162,7 @@ export class HouseScript {
       h.mother.huntable = true;
       h.father.aggressive = true;
       h.mother.aggressive = true;
-      w.setObjective('Они проснулись. Носильщики идут к кокону, прикрывай их. Фонарь видит только впереди: заходи со спины.');
+      w.setObjective('Они проснулись и давят рой. Подкрепляй бойцов: когда сядут телефоны, людям конец.');
     },
     still: () => {
       const { w, h } = this;
@@ -296,14 +298,11 @@ export class HouseScript {
         if (this.t > 1.2 && !this.hatched) this.hatchNow();
         if (this.t > 3.6) {
           w.bus.emit('radio', { who: 'Рой', text: 'Восемь. Голодные.' });
-          this.go('swarm');
+          this.go('quiet');
         }
         break;
-      case 'swarm':
-        if (w.stats.gathered >= 3) this.go('breed');
-        break;
-      case 'breed':
-        if (w.count('fighter') >= 4) this.go('wire');
+      case 'quiet':
+        this.quietTick(dt);
         break;
       case 'wire': {
         if (w.wire.done) {
@@ -320,7 +319,7 @@ export class HouseScript {
       case 'dark':
         if (this.t > 2 && !this.momUp) {
           this.momUp = true;
-          wake(w, h.mother, () => {
+          this.rouse(h.mother, () => {
             giveTorch(w, h.mother);
             goTo(w, h.mother, p.hallMid.x + 1.6, p.hallMid.z, () => {
               h.mother.pause = 4;
@@ -351,14 +350,7 @@ export class HouseScript {
       default:
         break;
     }
-    // Мухи не кончаются, иначе рой мог бы застрять без соков.
-    if (this.hatched && w.flies.length < 6) {
-      this.flyT = (this.flyT ?? 0) - dt;
-      if (this.flyT <= 0) {
-        this.flyT = 1.6;
-        w.addFly(p.plate.x + w.rng.range(-0.3, 0.3), p.plate.z + w.rng.range(-0.3, 0.3));
-      }
-    }
+    if (['wire', 'grandpa', 'hunt'].includes(this.step)) this.assaultTick();
     // Отец и мать бродят, пока рой занят стариком.
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.father);
     if (['grandpa', 'hunt'].includes(this.step)) this.patrol(h.mother);
@@ -398,12 +390,121 @@ export class HouseScript {
     if (!this.lowSaid && this.battery < 22) {
       this.lowSaid = true;
       w.bus.emit('radio', { who: 'Отец', text: 'Два процента. Телефон сейчас сядет.' });
-      w.setObjective('Их свет кончается. Копи рой в темноте и жди.');
+      w.setObjective('Их свет кончается. Копи бойцов, скоро темнота.');
     }
     if (!this.outSaid && this.battery <= 0) {
       this.outSaid = true;
       w.say('Темнота.', { ms: 2600 });
-      w.setObjective('Они ослепли. Теперь бери их.');
+      w.setObjective('Они ослепли. Рой добивает их.');
+    }
+  }
+
+  // Тихая фаза: таймер до нападения и обходы тем чаще, чем выше подозрение.
+  quietTick(dt) {
+    const { w, h, p } = this;
+    this.quietLeft -= dt;
+    w.quietLeft = Math.max(0, this.quietLeft);
+    if (this.quietLeft <= 0) {
+      w.say('Рой больше не может ждать.', { ms: 2600 });
+      while (w.count('fighter') < WAVE) w.spawn('fighter', p.crack.x - 0.6, p.crack.z + 0.7);
+      this.launch();
+      return;
+    }
+    const m = this.walker;
+    if (m) {
+      this.walkT -= dt;
+      if (this.walkT <= 0 && !this.goingBack) {
+        // Человек обязательно возвращается в кровать, даже если отвлёкся на паука.
+        this.goingBack = true;
+        m.aggressive = false;
+        const back = () => {
+          dropTorch(w, m);
+          lieDown(m);
+          this.walker = null;
+          this.goingBack = false;
+        };
+        if (m.state === 'stomp' || m.state === 'recover') this.walkT = 0.5, (this.goingBack = false), (m.aggressive = true);
+        else goTo(w, m, m.standX, m.standZ, back, 0.85);
+      }
+      return;
+    }
+    if (h.father.state !== 'sleep' || h.mother.state !== 'sleep') return;
+    this.patrolT -= dt * (1 + w.suspicion / 40);
+    if (this.patrolT <= 0) {
+      this.patrolT = 50 + w.rng.next() * 25;
+      w.suspicion = Math.max(0, w.suspicion - 25);
+      this.startWalk(w.rng.pick([h.father, h.mother]));
+    }
+  }
+
+  // Человек встаёт с телефоном и идёт проверить источник еды. На свету он давит пауков.
+  startWalk(m) {
+    const { w, p } = this;
+    const open = w.foods.filter((f) => f.open);
+    const f = w.rng.pick(open);
+    this.walker = m;
+    this.walkT = 15;
+    this.goingBack = false;
+    m.standX = m.x;
+    m.standZ = p.plate.z + 0.85;
+    m.aggressive = true;
+    m.cool = 1;
+    w.bus.emit('radio', { who: m.name, text: w.rng.pick(PATROL_LINES) });
+    w.bus.emit('notice', 'Обход! Человек идёт к еде');
+    wake(w, m, () => {
+      giveTorch(w, m);
+      goTo(w, m, f.x + 0.3, f.z + 0.35, () => {
+        m.pause = 99;
+      }, 0.85);
+    });
+  }
+
+  rouse(m, then) {
+    if (m.state === 'sleep') {
+      m.standX = m.x;
+      m.standZ = this.p.plate.z + 0.85;
+      wake(this.w, m, then);
+    } else {
+      this.walker = null;
+      then();
+    }
+  }
+
+  // Кнопка НАПАСТЬ.
+  launch() {
+    if (this.step === 'quiet') this.go('wire');
+  }
+
+  // Бойцы сами выбирают цель. Если все погибли, рой копит волну и снова идёт.
+  assaultTick() {
+    const { w, h } = this;
+    const fighters = w.spiders.filter((s) => s.kind === 'fighter');
+    const idle = fighters.filter((s) => !s.on && !s.order);
+    const home = w.nests[0];
+    if (fighters.length === idle.length && idle.length < WAVE) {
+      if (this.fought && !this.brokenSaid) {
+        this.brokenSaid = true;
+        w.bus.emit('notice', 'Волна разбита. Рой копит новую');
+      }
+      for (const s of idle) {
+        if (Math.hypot(s.x - home.x, s.z - home.z) > 1) s.order = { type: 'move', x: home.x - 0.4, z: home.z + 0.6, field: home.field };
+      }
+      return;
+    }
+    this.fought = true;
+    this.brokenSaid = false;
+    for (const s of idle) {
+      if (this.step === 'wire') {
+        s.order = { type: 'gnaw' };
+        continue;
+      }
+      if (this.step === 'grandpa') {
+        s.order = { type: 'attack', h: h.grandpa };
+        continue;
+      }
+      const alive = [h.father, h.mother].filter((x) => w.canBite(x));
+      const target = alive.find((x) => !x.torch) ?? alive[0];
+      if (target) s.order = { type: 'attack', h: target };
     }
   }
 
@@ -412,10 +513,9 @@ export class HouseScript {
     this.hatched = true;
     if (w.hero) w.hero.hidden = false;
     w.addNest(p.crack.x, p.crack.z + 0.05);
-    w.spawn('fighter', p.crack.x - 0.5, p.crack.z + 0.45);
-    w.spawn('fighter', p.crack.x - 0.25, p.crack.z + 0.75);
     w.spawn('carrier', p.crack.x - 0.8, p.crack.z + 0.35);
     w.spawn('carrier', p.crack.x - 0.65, p.crack.z + 0.7);
+    w.spawn('carrier', p.crack.x - 0.4, p.crack.z + 0.5);
     if (w.hero) {
       w.hero.x = p.crack.x - 0.9;
       w.hero.z = p.crack.z + 0.75;
@@ -423,17 +523,17 @@ export class HouseScript {
       w.hero.pz = w.hero.z;
     }
     w.res.soki = 0;
-    for (let i = 0; i < 8; i++) w.addFly(p.plate.x + w.rng.range(-0.3, 0.3), p.plate.z + w.rng.range(-0.3, 0.3));
+    w.addFood({ name: 'Мухи у тарелки', x: p.plate.x, z: p.plate.z, value: 3, max: 8, regen: 0.55, bugs: true, room: 1 });
+    w.addFood({ name: 'Мокрицы в ванной', x: p.puddle.x, z: p.puddle.z, value: 5, max: 6, regen: 0.4, bugs: true, room: 2, open: false });
+    w.addFood({ name: 'Мусор на кухне', x: p.trash.x, z: p.trash.z, value: 8, max: 6, regen: 0.35, bugs: true, room: 5, open: false });
     w.flags.resources = true;
     w.bus.emit('flags', w.flags);
-    // С этого момента у игрока настоящая стратегия: без приказа никто не двигается.
+    // С этого момента рой живёт сам, а игрок управляет только экономикой.
     w.rts = true;
     w.mark = null;
     w.markField = null;
     w.markLimit = null;
-    w.food = { x: p.plate.x, z: p.plate.z, field: w.grid.flow(p.plate.x, p.plate.z, 'spider') };
     this.cam('room');
-    w.bus.emit('hatched');
   }
 
   // Перенос на нужный шаг для проверок: ?skip=wire
@@ -444,12 +544,11 @@ export class HouseScript {
     w.res.soki = 300;
     w.flags.swarmBar = true;
     w.bus.emit('flags', w.flags);
-    if (step === 'swarm') {
+    if (step === 'quiet') {
       this.go(step);
       return;
     }
-    w.spawn('fighter', p.crack.x - 0.8, p.crack.z + 0.9);
-    w.spawn('fighter', p.crack.x - 0.5, p.crack.z + 1.1);
+    for (let i = 0; i < 5; i++) w.spawn('fighter', p.crack.x - 0.8 + i * 0.1, p.crack.z + 0.9);
     w.revealRoom(4);
     w.revealRoom(3);
     if (step === 'wire') {
@@ -475,8 +574,8 @@ export class HouseScript {
     const { w, p } = this;
     if (hm.state !== 'alert' || hm.t < (hm.pause ?? 2)) return;
     hm.pause = 2 + w.rng.next() * 3;
-    const spots = [p.hallMid, p.wire, p.plate, { x: p.plate.x + 0.6, z: p.plate.z + 1.2 }, { x: p.grandpa.x + 1, z: p.grandpa.z + 1.6 }];
-    const s = w.rng.pick(spots);
+    const open = w.foods.filter((f) => f.open);
+    const s = w.rng.next() < 0.5 && open.length ? w.rng.pick(open) : p.hallMid;
     goTo(w, hm, s.x, s.z, () => {}, this.step === 'hunt' ? 0.72 : 0.6);
   }
 }

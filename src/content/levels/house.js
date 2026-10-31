@@ -337,6 +337,8 @@ export function buildHouse() {
       hand: { x: at(2.88), z: at(0.92) },
       crack: { x: at(5.3), z: at(0.2) },
       plate: { x: at(3.75), z: at(1.75) },
+      puddle: { x: at(6.9), z: at(2.6) },
+      trash: { x: at(5.2), z: at(9.05) },
       wire: { x: at(5.22), z: at(4.34) },
       grandpa: { x: at(8.8), z: at(1.2) },
       lenaBed: { x: at(11.6), z: at(8.4) },
