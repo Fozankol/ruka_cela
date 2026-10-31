@@ -83,9 +83,20 @@ export class World {
     this.lightDirty = true;
   }
 
+  // Открывает комнату вместе со стенами вокруг неё.
   revealRoom(room) {
     const g = this.grid;
-    for (let i = 0; i < g.n; i++) if (g.room[i] === room) g.seen[i] = 1;
+    const R = 3;
+    for (let cz = 0; cz < g.h; cz++) {
+      for (let cx = 0; cx < g.w; cx++) {
+        if (g.room[g.idx(cx, cz)] !== room) continue;
+        for (let dz = -R; dz <= R; dz++) {
+          for (let dx = -R; dx <= R; dx++) {
+            if (g.inb(cx + dx, cz + dz)) g.seen[g.idx(cx + dx, cz + dz)] = 1;
+          }
+        }
+      }
+    }
   }
 
   spawn(kind, x, z) {
@@ -391,8 +402,14 @@ export class World {
     this.bus.emit('slipper', { x, z, phase: 'hit', life: 0.3 });
     this.bus.emit('ripple', { x, z, power: 1.6, kind: 'stomp' });
     this.bus.emit('shake', 0.9);
+    // Тапок давит не больше трёх: иначе один удар сносил бы весь рой в тесной комнате.
+    let kills = 0;
     for (const s of [...this.spiders]) {
-      if (!s.hidden && !s.on && dist(s.x, s.z, x, z) < r) this.killSpider(s);
+      if (s.hidden || s.on || dist(s.x, s.z, x, z) >= r) continue;
+      if (s.kind === 'hero' || kills < 3) {
+        this.killSpider(s);
+        kills++;
+      }
     }
   }
 
@@ -459,7 +476,7 @@ export class World {
     const { sense, seen, web } = g;
     for (let i = 0; i < g.n; i++) {
       const lit = g.lit(i) > 0.16 ? 1 : 0;
-      const base = web[i] > 0 || lit ? 1 : seen[i] ? 0.62 : 0.14;
+      const base = web[i] > 0 || lit ? 1 : seen[i] ? 0.7 : 0.24;
       sense[i] += (base - sense[i]) * 0.3;
     }
     const stampR = (s, r) => {

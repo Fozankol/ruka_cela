@@ -15,7 +15,7 @@
 ## S2. Звук
 
 ```text
-Прочитай @docs/GDD.md, раздел «Как устроен страх». Создай только файлы в папке src/audio/.
+Прочитай @docs/GDD.md, раздел «Как устроен страх». Создай только файлы в папке src/audio/, главный файл: src/audio/GameAudio.js. Игра подключит его сама через src/core/sound.js.
 Сделай модуль на Web Audio без внешних файлов. Экспорт: класс GameAudio с методами unlock(), setMaster(v), setDread(v от 0 до 1), play(name, {pan, volume}), radioStatic(on).
 Имена звуков: step, scuttle, bite, slipper, lightOn, lightOff, wireSnap, cocoon, hatch, heartbeat, uiClick, radioBlip, alarm, explosion, windowOpen.
 Постоянный фон: низкий гул, который меняется от setDread. Резких пиков громкости быть не должно.

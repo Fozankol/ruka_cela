@@ -1,4 +1,5 @@
 import './style.css';
+import { connectSound } from './core/sound.js';
 import { buildHouse } from './content/levels/house.js';
 import { HouseScript } from './content/story/house.js';
 import { Diorama } from './render/Diorama.js';
@@ -48,6 +49,8 @@ world.bus.on('levelComplete', () => {
   world.say('Первый дом молчит. В соседнем горит свет.', { ms: 9000 });
   stage.setCamera({ target: { x: p.outside.x, z: p.outside.z + 8 }, dist: 46, pitch: 0.95, yaw: 1.57, soft: 0.5 });
 });
+
+connectSound(world, stage);
 
 // Управление.
 const canvas = stage.renderer.domElement;

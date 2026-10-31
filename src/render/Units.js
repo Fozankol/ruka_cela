@@ -309,6 +309,8 @@ export class Units {
     const w = this.world;
     const d = this.dummy;
     let n = 0;
+    // Вдали пауки чуть крупнее реального, иначе рой превратился бы в пыль.
+    const far = 1 + Math.min(1.3, Math.max(0, (this.stage.rig.dist - 4) * 0.085));
     for (const s of w.spiders) {
       if (s.hidden || n >= MAX_SPIDERS) continue;
       const def = SPIDERS[s.kind];
@@ -316,7 +318,7 @@ export class Units {
       const z = s.on ? s.z : lerp(s.pz, s.z, alpha);
       d.position.set(x, s.y, z);
       d.rotation.set(0, -s.dir, 0);
-      d.scale.setScalar(def.scale);
+      d.scale.setScalar(def.scale * far);
       d.updateMatrix();
       this.spiders.setMatrixAt(n, d.matrix);
       this.anim[n * 2] = s.moveSeed;
