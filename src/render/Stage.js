@@ -1,0 +1,233 @@
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { clamp, lerp } from '../core/util.js';
+import { shared } from './worldMaterial.js';
+
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDread: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uDread;
+    varying vec2 vUv;
+    float rand(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec2 c = vUv - .5;
+      float r2 = dot(c, c);
+      float ab = (.0012 + uDread * .002) * r2 * 4.;
+      vec3 col;
+      col.r = texture2D(tDiffuse, vUv + c * ab).r;
+      col.g = texture2D(tDiffuse, vUv).g;
+      col.b = texture2D(tDiffuse, vUv - c * ab).b;
+      col *= 1. - smoothstep(.1, .62, r2) * .78;
+      float g = rand(vUv * 913. + fract(uTime) * 37.) - .5;
+      col += g * .018;
+      gl_FragColor = vec4(max(col, 0.), 1.);
+    }
+  `,
+};
+
+function makeStars(scene) {
+  const n = 2600;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    v.randomDirection().multiplyScalar(180);
+    v.y = Math.abs(v.y);
+    pos.set([v.x, v.y, v.z], i * 3);
+    const b = Math.pow(Math.random(), 3) * 1.6 + 0.2;
+    col.set([b * 0.8, b * 0.86, b], i * 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const stars = new THREE.Points(g, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, depthWrite: false, fog: false }));
+  stars.frustumCulled = false;
+  scene.add(stars);
+
+  // Восемь звёзд расположены как глаза паука и растут вместе с игрой.
+  const eyes = new THREE.Group();
+  const layout = [[-1.5, 0.15, 0.8], [-0.55, 0.45, 1.25], [0.55, 0.45, 1.25], [1.5, 0.15, 0.8], [-1.0, -0.55, 0.62], [-0.33, -0.3, 0.72], [0.33, -0.3, 0.72], [1.0, -0.55, 0.62]];
+  const tex = glowTexture();
+  for (const [x, y, s] of layout) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(3.6, 1.8, 1.4), depthWrite: false, blending: THREE.AdditiveBlending, transparent: true, fog: false }));
+    sp.position.set(x, y, 0);
+    sp.userData.base = s;
+    sp.scale.setScalar(s);
+    eyes.add(sp);
+  }
+  eyes.position.set(-90, 26, -120);
+  eyes.lookAt(0, 0, 0);
+  eyes.scale.setScalar(2.4);
+  scene.add(eyes);
+  return { stars, eyes };
+}
+
+function glowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.14, 'rgba(255,255,255,.8)');
+  g.addColorStop(0.3, 'rgba(255,255,255,.16)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+// Камера, постобработка и текстура карты, через которую шейдер видит симуляцию.
+export class Stage {
+  constructor(canvas) {
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    this.renderer = renderer;
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    renderer.setPixelRatio(this.pixelRatio);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;
+
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x03040a);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.03, 900);
+
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+    this.composer = new EffectComposer(renderer, rt);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.5, 0.55, 0.92);
+    this.composer.addPass(this.bloom);
+    this.grade = new ShaderPass(GradeShader);
+    this.composer.addPass(this.grade);
+    this.composer.addPass(new OutputPass());
+
+    const sky = makeStars(this.scene);
+    this.eyes = sky.eyes;
+
+    this.rig = {
+      target: new THREE.Vector3(),
+      goal: new THREE.Vector3(),
+      dist: 6,
+      goalDist: 6,
+      pitch: 1,
+      goalPitch: 1,
+      yaw: 1.57,
+      goalYaw: 1.57,
+      follow: null,
+      soft: 3,
+    };
+    this.shake = 0;
+    this.bounds = null;
+    this.ray = new THREE.Raycaster();
+    this.ndc = new THREE.Vector2();
+    this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.hit = new THREE.Vector3();
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.renderer.setSize(w, h, false);
+    this.composer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  bindMap(grid) {
+    this.grid = grid;
+    const n = grid.n;
+    this.mapData = new Uint8Array(n * 4);
+    this.dispW = new Float32Array(n);
+    this.dispC = new Float32Array(n);
+    this.dispWeb = new Float32Array(n);
+    this.dispSense = new Float32Array(grid.sense);
+    if (this.mapTex) this.mapTex.dispose();
+    const tex = new THREE.DataTexture(this.mapData, grid.w, grid.h, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    this.mapTex = tex;
+    shared.uMap.value = tex;
+    shared.uMapXform.value.set(1 / (grid.w * grid.cell), 1 / (grid.h * grid.cell), 0, 0);
+  }
+
+  updateMap(dt) {
+    const g = this.grid;
+    const k = 1 - Math.exp(-dt * 11);
+    const ks = 1 - Math.exp(-dt * 6);
+    const d = this.mapData;
+    const { dispW, dispC, dispWeb, dispSense } = this;
+    const { lightW, lightC, web, sense } = g;
+    for (let i = 0; i < g.n; i++) {
+      dispW[i] += (lightW[i] - dispW[i]) * k;
+      dispC[i] += (lightC[i] - dispC[i]) * k;
+      dispWeb[i] += (web[i] - dispWeb[i]) * ks;
+      dispSense[i] += (sense[i] - dispSense[i]) * ks;
+      const o = i * 4;
+      d[o] = Math.min(255, dispW[i] * 170);
+      d[o + 1] = dispWeb[i] * 255;
+      d[o + 2] = Math.min(255, dispC[i] * 170);
+      d[o + 3] = dispSense[i] * 255;
+    }
+    this.mapTex.needsUpdate = true;
+  }
+
+  setCamera({ target, dist, pitch, yaw, soft = 3 }, snap = false) {
+    const r = this.rig;
+    if (target) r.goal.set(target.x, target.y ?? 0, target.z);
+    if (dist !== undefined) r.goalDist = dist;
+    if (pitch !== undefined) r.goalPitch = pitch;
+    if (yaw !== undefined) r.goalYaw = yaw;
+    r.soft = soft;
+    if (snap) {
+      r.target.copy(r.goal);
+      r.dist = r.goalDist;
+      r.pitch = r.goalPitch;
+      r.yaw = r.goalYaw;
+    }
+  }
+
+  pick(clientX, clientY) {
+    this.ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, this.camera);
+    return this.ray.ray.intersectPlane(this.plane, this.hit) ? { x: this.hit.x, z: this.hit.z } : null;
+  }
+
+  update(dt) {
+    const r = this.rig;
+    if (r.follow) r.goal.set(r.follow().x, r.goal.y, r.follow().z);
+    const k = 1 - Math.exp(-dt * r.soft);
+    r.target.lerp(r.goal, k);
+    r.dist = lerp(r.dist, r.goalDist, k);
+    r.pitch = lerp(r.pitch, r.goalPitch, k);
+    r.yaw = lerp(r.yaw, r.goalYaw, k);
+    const cp = Math.cos(r.pitch);
+    const c = this.camera;
+    c.position.set(r.target.x + Math.cos(r.yaw) * cp * r.dist, r.target.y + Math.sin(r.pitch) * r.dist, r.target.z + Math.sin(r.yaw) * cp * r.dist);
+    this.shake = Math.max(0, this.shake - dt * 2.6);
+    if (this.shake > 0) {
+      const s = this.shake * this.shake * 0.05 * clamp(r.dist / 2, 0.5, 3);
+      c.position.x += (Math.random() - 0.5) * s;
+      c.position.y += (Math.random() - 0.5) * s;
+      c.position.z += (Math.random() - 0.5) * s;
+    }
+    c.lookAt(r.target);
+    shared.uCam.value.copy(c.position);
+    shared.uTime.value += dt;
+    this.grade.uniforms.uTime.value = shared.uTime.value;
+  }
+
+  render() {
+    this.composer.render();
+  }
+}
