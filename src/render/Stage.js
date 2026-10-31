@@ -5,7 +5,49 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { clamp, lerp } from '../core/util.js';
-import { shared } from './worldMaterial.js';
+import { T } from '../sim/grid.js';
+import { KeyShadow } from './KeyShadow.js';
+import { buildMaterialAtlas } from './textures.js';
+import { FAR, MAX_LIGHTS, shared } from './worldMaterial.js';
+
+const DofShader = {
+  uniforms: { tDiffuse: { value: null }, uFocus: { value: 2 }, uRange: { value: 1 }, uMax: { value: 0.01 }, uAspect: { value: 1 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uFocus;
+    uniform float uRange;
+    uniform float uMax;
+    uniform float uAspect;
+    varying vec2 vUv;
+    float coc(float d){ return clamp(abs(d - uFocus) / uRange - .12, 0., 1.) * uMax; }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      // Защита от случайного NaN: размытие растянуло бы его на весь кадр.
+      if (!(c.r == c.r && c.g == c.g && c.b == c.b && c.a == c.a)) c = vec4(0., 0., 0., 1.);
+      float d = c.a * ${FAR.toFixed(1)};
+      float r0 = coc(d);
+      vec3 sum = c.rgb;
+      float total = 1.;
+      float rot = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.283;
+      if (r0 < .0003) { gl_FragColor = c; return; }
+      for (int i = 1; i <= 12; i++) {
+        float t = float(i) / 12.;
+        float a = float(i) * 2.39996 + rot;
+        vec2 o = vec2(cos(a), sin(a) * uAspect) * sqrt(t) * r0;
+        vec4 s = texture2D(tDiffuse, vUv + o);
+        if (!(s.r == s.r && s.g == s.g && s.b == s.b && s.a == s.a)) continue;
+        float sd = s.a * ${FAR.toFixed(1)};
+        float rs = coc(sd);
+        // Резкий передний план не расплывается на фоне, а размытый заходит на резкий.
+        float w = sd < d ? step(length(o * vec2(1., 1. / uAspect)), rs + .0006) : (r0 > .0002 ? 1. : 0.);
+        sum += s.rgb * w;
+        total += w;
+      }
+      gl_FragColor = vec4(sum / total, c.a);
+    }
+  `,
+};
 
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDread: { value: 0 } },
@@ -19,14 +61,17 @@ const GradeShader = {
     void main(){
       vec2 c = vUv - .5;
       float r2 = dot(c, c);
-      float ab = (.0012 + uDread * .002) * r2 * 4.;
+      float ab = (.0014 + uDread * .002) * r2 * 4.;
       vec3 col;
       col.r = texture2D(tDiffuse, vUv + c * ab).r;
       col.g = texture2D(tDiffuse, vUv).g;
       col.b = texture2D(tDiffuse, vUv - c * ab).b;
-      col *= 1. - smoothstep(.1, .62, r2) * .78;
-      float g = rand(vUv * 913. + fract(uTime) * 37.) - .5;
-      col += g * .018;
+      // Тени уходят в синий, света остаются тёплыми.
+      float l = dot(col, vec3(.3, .59, .11));
+      col = mix(col, col * vec3(.82, .96, 1.32), smoothstep(.35, .0, l) * .55);
+      col = mix(vec3(l), col, 1.16);
+      col *= 1. - smoothstep(.12, .68, r2) * .72;
+      col += (rand(vUv * 913. + fract(uTime) * 37.) - .5) * .014;
       gl_FragColor = vec4(max(col, 0.), 1.);
     }
   `,
@@ -69,7 +114,7 @@ function makeStars(scene) {
   return { stars, eyes };
 }
 
-function glowTexture() {
+export function glowTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const x = c.getContext('2d');
@@ -83,25 +128,30 @@ function glowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-// Камера, постобработка и текстура карты, через которую шейдер видит симуляцию.
+// Камера, постобработка и текстуры, через которые шейдер видит симуляцию.
 export class Stage {
   constructor(canvas) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.renderer = renderer;
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.25);
     renderer.setPixelRatio(this.pixelRatio);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
+    renderer.toneMappingExposure = 1.3;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x03040a);
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.03, 900);
+    this.scene.background = new THREE.Color(0x02030a);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 0.03, 900);
+
+    shared.uTex.value = buildMaterialAtlas();
+    this.shadow = new KeyShadow(renderer, this.scene);
 
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.5, 0.55, 0.92);
+    this.dof = new ShaderPass(DofShader);
+    this.composer.addPass(this.dof);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.42, 0.6, 0.95);
     this.composer.addPass(this.bloom);
     this.grade = new ShaderPass(GradeShader);
     this.composer.addPass(this.grade);
@@ -123,14 +173,41 @@ export class Stage {
       soft: 3,
     };
     this.shake = 0;
-    this.bounds = null;
     this.ray = new THREE.Raycaster();
     this.ndc = new THREE.Vector2();
     this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this.hit = new THREE.Vector3();
+    this.keyLight = { px: 0, py: 0, pz: 0, dir: null };
+    this.keyDir = new THREE.Vector3();
 
+    this.quality = 0;
+    this.qT = 0;
+    this.qN = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // Слабая видеокарта не должна портить игру: качество снижается само.
+  setQuality(q) {
+    this.quality = q;
+    const base = Math.min(window.devicePixelRatio || 1, 1.25);
+    const pr = q === 0 ? base : q < 3 ? Math.min(base, 1) : 0.8;
+    this.renderer.setPixelRatio(pr);
+    this.composer.setPixelRatio(pr);
+    this.dof.enabled = q < 2;
+    this.bloom.enabled = q < 3;
+    this.resize();
+  }
+
+  watchQuality(dt) {
+    if (document.visibilityState !== 'visible' || dt > 0.25) return;
+    this.qT += dt;
+    this.qN++;
+    if (this.qT < 3) return;
+    const fps = this.qN / this.qT;
+    this.qT = 0;
+    this.qN = 0;
+    if (fps < 38 && this.quality < 3) this.setQuality(this.quality + 1);
   }
 
   resize() {
@@ -140,6 +217,7 @@ export class Stage {
     this.composer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.dof.uniforms.uAspect.value = w / h;
   }
 
   bindMap(grid) {
@@ -154,11 +232,44 @@ export class Stage {
     const tex = new THREE.DataTexture(this.mapData, grid.w, grid.h, THREE.RGBAFormat, THREE.UnsignedByteType);
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearFilter;
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
     this.mapTex = tex;
     shared.uMap.value = tex;
+    shared.uAO.value = this.bakeAO(grid);
     shared.uMapXform.value.set(1 / (grid.w * grid.cell), 1 / (grid.h * grid.cell), 0, 0);
+  }
+
+  // Мягкое затемнение пола у стен и мебели, посчитано один раз по сетке.
+  bakeAO(g) {
+    const R = 7;
+    const d = new Uint8Array(g.n).fill(255);
+    const q = [];
+    for (let i = 0; i < g.n; i++) {
+      if (g.type[i] === T.WALL || g.type[i] === T.FURN) {
+        d[i] = 0;
+        q.push(i);
+      }
+    }
+    for (let head = 0; head < q.length; head++) {
+      const i = q[head];
+      if (d[i] >= R) continue;
+      const cx = i % g.w;
+      const cz = (i - cx) / g.w;
+      for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]]) {
+        if (!g.inb(nx, nz)) continue;
+        const ni = g.idx(nx, nz);
+        if (d[ni] === 255) {
+          d[ni] = d[i] + 1;
+          q.push(ni);
+        }
+      }
+    }
+    const data = new Uint8Array(g.n);
+    for (let i = 0; i < g.n; i++) data[i] = 255 * Math.pow(Math.min(1, d[i] / R), 0.75);
+    const tex = new THREE.DataTexture(data, g.w, g.h, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   updateMap(dt) {
@@ -180,6 +291,52 @@ export class Stage {
       d[o + 3] = dispSense[i] * 255;
     }
     this.mapTex.needsUpdate = true;
+  }
+
+  // Ближайшие к камере источники попадают в шейдер, первый из них отбрасывает тень.
+  updateLights(world) {
+    const c = this.rig.target;
+    const list = [];
+    for (const l of world.lights) {
+      if (!l.on || l.moon) continue;
+      const d = Math.hypot(l.x - c.x, l.z - c.z) - (l.dynamic ? 2 : l.warm ? 1.5 : 0);
+      list.push({ l, d });
+    }
+    list.sort((a, b) => a.d - b.d);
+    const { uL, uLC, uLD } = shared;
+    for (let i = 0; i < MAX_LIGHTS; i++) {
+      const e = list[i];
+      if (!e) {
+        uL.value[i].w = 0;
+        continue;
+      }
+      const l = e.l;
+      const y = l.dynamic ? 1.2 : l.bulb ? l.bulb[1] : l.y ?? 2.1;
+      uL.value[i].set(l.x, y, l.z, l.radius * 1.12);
+      if (l.warm) uLC.value[i].set(1.75, 1.06, 0.5, 1).multiplyScalar(1);
+      else uLC.value[i].set(1.1, 1.45, 2.2, 0);
+      const p = l.power;
+      uLC.value[i].x *= p;
+      uLC.value[i].y *= p;
+      uLC.value[i].z *= p;
+      if (l.dynamic) {
+        this.keyDir.set(Math.cos(l.dir), -0.32, Math.sin(l.dir)).normalize();
+        uLD.value[i].set(this.keyDir.x, this.keyDir.y, this.keyDir.z, Math.cos(l.cone));
+      } else {
+        uLD.value[i].set(0, -1, 0, -2);
+      }
+    }
+    const key = list[0];
+    if (!key) {
+      this.keyOn = false;
+      return;
+    }
+    this.keyOn = true;
+    const v = uL.value[0];
+    this.keyLight.px = v.x;
+    this.keyLight.py = v.y;
+    this.keyLight.pz = v.z;
+    this.keyLight.dir = key.l.dynamic ? new THREE.Vector3(uLD.value[0].x, uLD.value[0].y, uLD.value[0].z) : null;
   }
 
   setCamera({ target, dist, pitch, yaw, soft = 3 }, snap = false) {
@@ -204,8 +361,12 @@ export class Stage {
   }
 
   update(dt) {
+    this.watchQuality(dt);
     const r = this.rig;
-    if (r.follow) r.goal.set(r.follow().x, r.goal.y, r.follow().z);
+    if (r.follow) {
+      const f = r.follow();
+      r.goal.set(f.x, r.goal.y, f.z);
+    }
     const k = 1 - Math.exp(-dt * r.soft);
     r.target.lerp(r.goal, k);
     r.dist = lerp(r.dist, r.goalDist, k);
@@ -224,10 +385,19 @@ export class Stage {
     c.lookAt(r.target);
     shared.uCam.value.copy(c.position);
     shared.uTime.value += dt;
+    shared.uFog.value = 0.11 / Math.max(1, r.dist * 0.6);
     this.grade.uniforms.uTime.value = shared.uTime.value;
+
+    // Вблизи размытие как в макросъёмке, издали лёгкий эффект миниатюры.
+    const u = this.dof.uniforms;
+    u.uFocus.value = r.dist;
+    u.uRange.value = Math.max(0.5, r.dist * 0.75);
+    u.uMax.value = clamp(0.016 - r.dist * 0.0009, 0.0035, 0.016);
   }
 
-  render() {
+  render(world) {
+    this.updateLights(world);
+    this.shadow.render(this.keyOn && this.quality < 3 ? this.keyLight : null);
     this.composer.render();
   }
 }

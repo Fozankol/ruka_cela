@@ -3,7 +3,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { lerp } from '../core/util.js';
 import { SPIDERS } from '../sim/world.js';
 import { Figure } from './Figure.js';
-import { shared, worldMaterial } from './worldMaterial.js';
+import { HeroSpider, chitinMaterial } from './HeroSpider.js';
+import { CAST_LAYER } from './KeyShadow.js';
+import { additive, worldMaterial } from './worldMaterial.js';
 
 const MAX_SPIDERS = 1600;
 const MAX_RIPPLES = 96;
@@ -70,73 +72,9 @@ function spiderGeometry() {
   return merged;
 }
 
-function spiderMaterial() {
-  return new THREE.ShaderMaterial({
-    vertexColors: true,
-    uniforms: { uMap: shared.uMap, uMapXform: shared.uMapXform, uTime: shared.uTime, uCam: shared.uCam },
-    vertexShader: /* glsl */ `
-      attribute float aLeg;
-      attribute float aEmis;
-      attribute vec2 aAnim;
-      uniform float uTime;
-      varying vec3 vPos;
-      varying vec3 vN;
-      varying vec3 vCol;
-      varying float vEmis;
-      void main(){
-        vec3 p = position;
-        if (aLeg > 0.5) {
-          float reach = length(p.xz - vec2(.18, 0.));
-          float gait = mod(aLeg, 2.) * 3.14159;
-          float ph = uTime * (6. + aAnim.y * 16.) + aAnim.x * 6.28 + gait;
-          float a = sin(ph) * .34 * aAnim.y;
-          float c = cos(a * reach), s = sin(a * reach);
-          p.xz -= vec2(.18, 0.);
-          p.xz = mat2(c, -s, s, c) * p.xz;
-          p.xz += vec2(.18, 0.);
-          p.y += max(0., cos(ph)) * .2 * aAnim.y * reach;
-          p.y += sin(uTime * 1.3 + aAnim.x * 9. + aLeg) * .012;
-        }
-        mat4 m = modelMatrix * instanceMatrix;
-        vec4 wp = m * vec4(p, 1.);
-        vPos = wp.xyz;
-        vN = normalize(mat3(m) * normal);
-        vCol = color;
-        vEmis = aEmis;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform sampler2D uMap;
-      uniform vec4 uMapXform;
-      uniform vec3 uCam;
-      varying vec3 vPos;
-      varying vec3 vN;
-      varying vec3 vCol;
-      varying float vEmis;
-      void main(){
-        vec4 m = texture2D(uMap, (vPos.xz - uMapXform.zw) * uMapXform.xy);
-        vec3 N = normalize(vN);
-        vec3 V = normalize(uCam - vPos);
-        float rim = pow(1. - max(dot(N, V), 0.), 2.6);
-        vec3 H = normalize(V + vec3(-.4, .8, .4));
-        float spec = pow(max(dot(N, H), 0.), 48.);
-        vec3 lamp = vec3(1.2, .85, .55) * m.r + vec3(.8, .92, 1.2) * m.b;
-        vec3 col = vCol * (vec3(.32, .36, .5) + lamp * 2.5);
-        col += rim * (vec3(.24, .3, .46) + lamp * .5);
-        col += spec * (vec3(.36, .42, .6) + lamp);
-        col += vCol * vEmis;
-        gl_FragColor = vec4(col, 1.);
-      }
-    `,
-  });
-}
-
 function rippleMaterial() {
   return new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    ...additive,
     vertexShader: /* glsl */ `
       attribute vec3 aRip;
       varying vec2 vUv;
@@ -157,7 +95,7 @@ function rippleMaterial() {
         float ring2 = exp(-pow((d - age * .62) / .03, 2.)) * .45;
         float a = (ring + ring2) * (1. - age) * (1. - age) * vRip.y * smoothstep(1., .9, d);
         vec3 c = mix(vec3(.5, .72, 1.), vec3(1., .22, .12), vRip.z);
-        gl_FragColor = vec4(c * a, a);
+        gl_FragColor = vec4(c, a);
       }
     `,
   });
@@ -178,7 +116,8 @@ export class Units {
     const geo = spiderGeometry();
     this.anim = new Float32Array(MAX_SPIDERS * 2);
     geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(this.anim, 2).setUsage(THREE.DynamicDrawUsage));
-    this.spiders = new THREE.InstancedMesh(geo, spiderMaterial(), MAX_SPIDERS);
+    this.spiders = new THREE.InstancedMesh(geo, chitinMaterial({ instanced: true }), MAX_SPIDERS);
+    this.spiders.layers.enable(CAST_LAYER);
     this.spiders.frustumCulled = false;
     this.spiders.count = 0;
     this.group.add(this.spiders);
@@ -194,13 +133,13 @@ export class Units {
     this.group.add(this.rippleMesh);
     this.ripples = [];
 
-    this.beacon = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.235, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.3, 0.2), transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    this.beacon = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.235, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 0.3, 0.2), side: THREE.DoubleSide, ...additive }));
     this.beacon.rotation.x = -Math.PI / 2;
     this.beacon.position.y = 0.02;
     this.beacon.visible = false;
     this.group.add(this.beacon);
 
-    this.markRing = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.075, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.6, 1.9), transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    this.markRing = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.075, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.6, 1.9), side: THREE.DoubleSide, ...additive }));
     this.markRing.rotation.x = -Math.PI / 2;
     this.markRing.position.y = 0.018;
     this.markRing.visible = false;
@@ -229,6 +168,8 @@ export class Units {
     strap.position.set(0.06, 0.07, 0);
     this.slipper.add(strap);
     this.slipper.visible = false;
+    this.slipper.layers.enable(CAST_LAYER);
+    strap.layers.enable(CAST_LAYER);
     this.group.add(this.slipper);
     this.stompFx = null;
 
@@ -240,6 +181,7 @@ export class Units {
     this.group.add(this.flies);
 
     this.figures = world.humans.map((h) => new Figure(h, this.group));
+    this.hero = new HeroSpider(this.group, SPIDERS.hero.scale);
     this.cocoonMeshes = [];
     this.cocoonMat = worldMaterial({ color: 0xdde2ea, glow: 0.018 });
     this.cocoonGeo = new THREE.SphereGeometry(1, 16, 12);
@@ -285,6 +227,7 @@ export class Units {
 
   addCocoon(h) {
     const m = new THREE.Mesh(this.cocoonGeo, this.cocoonMat);
+    m.layers.enable(CAST_LAYER);
     if (h.lie > 0.5) {
       m.position.set(h.x, (h.bedY ?? 0.4) + 0.14, h.z - h.height * 0.46);
       m.scale.set(0.27, 0.24, h.height * 0.52);
@@ -312,7 +255,7 @@ export class Units {
     // Вдали пауки чуть крупнее реального, иначе рой превратился бы в пыль.
     const far = 1 + Math.min(1.3, Math.max(0, (this.stage.rig.dist - 4) * 0.085));
     for (const s of w.spiders) {
-      if (s.hidden || n >= MAX_SPIDERS) continue;
+      if (s.hidden || s.kind === 'hero' || n >= MAX_SPIDERS) continue;
       const def = SPIDERS[s.kind];
       const x = s.on ? s.x : lerp(s.px, s.x, alpha);
       const z = s.on ? s.z : lerp(s.pz, s.z, alpha);
@@ -399,6 +342,7 @@ export class Units {
     fp.needsUpdate = true;
 
     for (const f of this.figures) f.update(dt, alpha);
+    this.hero.update(w.hero, dt, alpha);
   }
 
   dispose() {

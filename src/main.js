@@ -2,6 +2,7 @@ import './style.css';
 import { connectSound } from './core/sound.js';
 import { buildHouse } from './content/levels/house.js';
 import { HouseScript } from './content/story/house.js';
+import { Atmosphere } from './render/Atmosphere.js';
 import { Diorama } from './render/Diorama.js';
 import { Stage } from './render/Stage.js';
 import { Units } from './render/Units.js';
@@ -21,6 +22,7 @@ world.script = script;
 stage.bindMap(level.grid);
 const diorama = new Diorama(level, stage.scene);
 const units = new Units(world, stage);
+const atmosphere = new Atmosphere(world, stage);
 const hud = new Hud(document.getElementById('ui'), world, {
   onPrompt: () => script.action(),
   onBuy: (kind) => world.buy(kind),
@@ -29,6 +31,7 @@ const hud = new Hud(document.getElementById('ui'), world, {
 const p = level.points;
 const presets = {
   crawl: { dist: 1.7, pitch: 0.3, yaw: 1.12, soft: 2.6 },
+  hand: { target: { x: p.hand.x + 0.07, z: p.hand.z + 0.1, y: 0.16 }, dist: 1.0, pitch: 0.15, yaw: 0.02, soft: 2.4 },
   flee: { dist: 3.4, pitch: 0.62, yaw: 1.05, soft: 2.2 },
   room: { target: { x: p.crack.x - 2.6, z: p.crack.z + 2.1 }, dist: 8.2, pitch: 1.02, yaw: 1.57, soft: 1.6 },
   house: { target: { x: level.worldW / 2, z: level.worldD / 2 }, dist: 19, pitch: 1.08, yaw: 1.57, soft: 1.2 },
@@ -45,6 +48,7 @@ world.bus.on('camera', ({ preset, follow }) => {
 });
 world.bus.on('shake', (v) => (stage.shake = Math.max(stage.shake, v)));
 world.bus.on('lamp', ({ id, on }) => diorama.setLamp(id, on));
+world.bus.on('blackout', () => diorama.powerOff());
 world.bus.on('levelComplete', () => {
   world.say('Первый дом молчит. В соседнем горит свет.', { ms: 9000 });
   stage.setCamera({ target: { x: p.outside.x, z: p.outside.z + 8 }, dist: 46, pitch: 0.95, yaw: 1.57, soft: 0.5 });
@@ -140,8 +144,9 @@ function frame(now) {
   stage.update(dt);
   stage.updateMap(dt);
   units.update(dt, acc / STEP);
+  atmosphere.update();
   hud.update();
-  stage.render();
+  stage.render(world);
   frames++;
   fpsT += dt;
   if (fpsT >= 1) {
@@ -174,8 +179,9 @@ function advance(seconds) {
     stage.updateMap(STEP);
     units.update(STEP, 1);
   }
+  atmosphere.update();
   hud.update();
-  stage.render();
+  stage.render(world);
 }
 
 Object.assign(window.__g, { world, stage, script, units, hud, advance, paused: params.has('paused') });

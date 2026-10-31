@@ -20,7 +20,7 @@ export class World {
     this.res = { silk: 0, soki: 0 };
     this.stats = { bites: 0, clicks: 0, started: 0 };
     this.alarm = 0;
-    this.biteRate = 0.02;
+    this.biteRate = 0.028;
     this.spiders = [];
     this.flies = [];
     this.nests = [];
@@ -80,6 +80,7 @@ export class World {
       }
     }
     this.powerCut = true;
+    this.bus.emit('blackout');
     this.lightDirty = true;
   }
 
@@ -466,6 +467,19 @@ export class World {
       g.web[ni] = Math.min(1, g.web[ni] + 0.34);
     }
     this.res.silk += dt * (0.3 * this.nests.length + weavers * 0.5 + this.count('ling') * 0.03 + this.webList.length * 0.0012);
+    this.hatchFromNests(dt);
+  }
+
+  // Гнёзда сами выводят паучат за шёлк: рой восстанавливается и после разгрома.
+  hatchFromNests(dt) {
+    this.nestT = (this.nestT ?? 0) - dt;
+    if (this.nestT > 0 || !this.nests.length) return;
+    this.nestT = 5 / this.nests.length;
+    if (this.res.silk < 3 || this.count('ling') >= 30) return;
+    this.res.silk -= 3;
+    const n = this.nests[Math.floor(this.rng.next() * this.nests.length)];
+    const s = this.spawn('ling', n.x + this.rng.range(-0.15, 0.15), n.z + this.rng.range(-0.15, 0.15));
+    this.bus.emit('ripple', { x: s.x, z: s.z, power: 0.4, kind: 'hatch' });
   }
 
   updateSense(dt) {

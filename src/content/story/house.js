@@ -50,8 +50,11 @@ export class HouseScript {
     },
     atHand: () => {
       this.w.setBeacon(null);
+      const hero = this.w.hero;
+      this.w.setMark(hero.x, hero.z);
       this.w.setObjective('Рука совсем рядом.');
       this.prompt('УКУСИТЬ');
+      this.cam('hand');
     },
     bite: () => {
       const { w, p, h } = this;
@@ -229,10 +232,13 @@ export class HouseScript {
     const hero = w.hero;
     switch (this.step) {
       case 'crawl':
-        if (hero && dist(hero.x, hero.z, p.hand.x, p.hand.z) < 0.26) this.go('atHand');
+        if (hero && dist(hero.x, hero.z, p.hand.x, p.hand.z) < 0.4) this.go('atHand');
         break;
       case 'atHand':
-        if (hero && dist(hero.x, hero.z, p.hand.x, p.hand.z) > 0.5) this.go('crawl');
+        if (hero && dist(hero.x, hero.z, p.hand.x, p.hand.z) > 0.62) {
+          this.cam('crawl', true);
+          this.go('crawl');
+        }
         break;
       case 'bite':
         if (this.t > 1.25) this.go('flee');

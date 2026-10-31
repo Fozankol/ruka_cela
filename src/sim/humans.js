@@ -12,7 +12,7 @@ export function makeHuman(def) {
     t: 0,
     cool: 0,
     venom: 0,
-    venomMax: def.deepSleep ? 1.3 : 3.2,
+    venomMax: def.deepSleep ? 1.3 : 2.2,
     wrap: 0,
     attached: 0,
     lie: 1,
@@ -130,7 +130,7 @@ function awakeUpkeep(world, h, dt) {
   if (h.attached > 0) {
     h.swatT -= dt;
     if (h.swatT <= 0) {
-      h.swatT = 0.5;
+      h.swatT = 0.8;
       world.swat(h);
     }
   }
@@ -215,7 +215,7 @@ export function tickHuman(world, h, dt) {
       awakeUpkeep(world, h, dt);
       h.swing = clamp(1 - h.t / 0.45);
       if (h.t > 0.45) {
-        h.cool = 0.35;
+        h.cool = 1.4;
         setState(h, 'alert');
       }
       break;
